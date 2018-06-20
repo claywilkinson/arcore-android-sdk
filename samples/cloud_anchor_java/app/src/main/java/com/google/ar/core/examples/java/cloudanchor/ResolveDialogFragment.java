@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,11 +22,14 @@ import android.os.Bundle;
 import android.support.v4.app.DialogFragment;
 import android.support.v4.app.FragmentActivity;
 import android.text.Editable;
-import android.view.View;
+import android.text.InputType;
 import android.widget.EditText;
+
 import com.google.common.base.Preconditions;
 
-/** A DialogFragment for the Resolve Dialog Box. */
+/**
+ * A DialogFragment for the Resolve Dialog Box.
+ */
 public class ResolveDialogFragment extends DialogFragment {
 
   interface OkListener {
@@ -48,25 +51,27 @@ public class ResolveDialogFragment extends DialogFragment {
   @Override
   public Dialog onCreateDialog(Bundle savedInstanceState) {
     FragmentActivity activity =
-        Preconditions.checkNotNull(getActivity(), "The activity cannot be null.");
+            Preconditions.checkNotNull(getActivity(), "The activity cannot be null.");
     AlertDialog.Builder builder = new AlertDialog.Builder(activity);
+    roomCodeField = new EditText(getContext());
+    roomCodeField.setInputType(InputType.TYPE_CLASS_NUMBER);
+    roomCodeField.setHint(R.string.resolve_dialog_text_hint);
 
-    // Passing null as the root is fine, because the view is for a dialog.
-    View dialogView = activity.getLayoutInflater().inflate(R.layout.resolve_dialog, null);
-    roomCodeField = dialogView.findViewById(R.id.room_code_input);
+
     builder
-        .setView(dialogView)
-        .setTitle(R.string.resolve_dialog_title)
-        .setPositiveButton(
-            R.string.resolve_dialog_ok,
-            (dialog, which) -> {
-              Editable roomCodeText = roomCodeField.getText();
-              if (okListener != null && roomCodeText != null && roomCodeText.length() > 0) {
-                Long longVal = Long.valueOf(roomCodeText.toString());
-                okListener.onOkPressed(longVal);
-              }
-            })
-        .setNegativeButton(R.string.cancel, (dialog, which) -> {});
+            .setView(roomCodeField)
+            .setTitle(R.string.resolve_dialog_title)
+            .setPositiveButton(
+                    R.string.resolve_dialog_ok,
+                    (dialog, which) -> {
+                      Editable roomCodeText = roomCodeField.getText();
+                      if (okListener != null && roomCodeText != null && roomCodeText.length() > 0) {
+                        Long longVal = Long.valueOf(roomCodeText.toString());
+                        okListener.onOkPressed(longVal);
+                      }
+                    })
+            .setNegativeButton(R.string.cancel, (dialog, which) -> {
+            });
     return builder.create();
   }
 }

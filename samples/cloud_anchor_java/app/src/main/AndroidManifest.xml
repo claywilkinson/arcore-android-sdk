@@ -30,6 +30,7 @@
       android:icon="@drawable/ic_launcher"
       android:label="@string/app_name"
       android:theme="@style/AppTheme"
+      android:supportsRtl="false"
       android:usesCleartextTraffic="false"
       tools:ignore="GoogleAppIndexingWarning">
 
@@ -50,5 +51,6 @@
          Application code must still call ArCoreApk.requestInstall() before beginning an ARCore
          sessions, in case the user uninstalls ARCore for any reason. -->
     <meta-data android:name="com.google.ar.core" android:value="required" />
+    <meta-data android:name="com.google.android.ar.API_KEY" android:value="YOUR_API_KEY_HERE"/>
   </application>
 </manifest>
