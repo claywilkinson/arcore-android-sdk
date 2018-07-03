@@ -25,8 +25,6 @@ import android.text.Editable;
 import android.text.InputType;
 import android.widget.EditText;
 
-import com.google.common.base.Preconditions;
-
 /**
  * A DialogFragment for the Resolve Dialog Box.
  */
@@ -50,8 +48,7 @@ public class ResolveDialogFragment extends DialogFragment {
 
   @Override
   public Dialog onCreateDialog(Bundle savedInstanceState) {
-    FragmentActivity activity =
-            Preconditions.checkNotNull(getActivity(), "The activity cannot be null.");
+    FragmentActivity activity = getActivity();
     AlertDialog.Builder builder = new AlertDialog.Builder(activity);
     roomCodeField = new EditText(getContext());
     roomCodeField.setInputType(InputType.TYPE_CLASS_NUMBER);

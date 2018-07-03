@@ -20,6 +20,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
+import android.util.Pair;
 import android.view.MotionEvent;
 import android.widget.Button;
 import android.widget.TextView;
@@ -33,6 +34,7 @@ import com.google.ar.core.Plane;
 import com.google.ar.core.Point;
 import com.google.ar.core.Point.OrientationMode;
 import com.google.ar.core.PointCloud;
+import com.google.ar.core.Pose;
 import com.google.ar.core.Trackable;
 import com.google.ar.core.TrackingState;
 import com.google.ar.core.examples.java.cloudanchor.sceneform.PointCloudNode;
@@ -42,12 +44,26 @@ import com.google.ar.sceneform.FrameTime;
 import com.google.ar.sceneform.HitTestResult;
 import com.google.ar.sceneform.Node;
 import com.google.ar.sceneform.Scene;
+import com.google.ar.sceneform.collision.Box;
+import com.google.ar.sceneform.math.Quaternion;
+import com.google.ar.sceneform.math.Vector3;
+import com.google.ar.sceneform.rendering.Color;
+import com.google.ar.sceneform.rendering.Material;
+import com.google.ar.sceneform.rendering.MaterialFactory;
 import com.google.ar.sceneform.rendering.ModelRenderable;
+import com.google.ar.sceneform.rendering.Renderable;
+import com.google.ar.sceneform.rendering.ShapeFactory;
 import com.google.ar.sceneform.ux.ArFragment;
+import com.google.ar.sceneform.ux.TransformableNode;
 import com.google.common.base.Preconditions;
 import com.google.firebase.database.DatabaseError;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Main Activity for the Cloud Anchor Example
@@ -58,32 +74,38 @@ import java.util.Collection;
  */
 public class CloudAnchorActivity extends AppCompatActivity {
   private static final String TAG = CloudAnchorActivity.class.getSimpleName();
-
-  private enum HostResolveMode {
-    NONE,
-    HOSTING,
-    RESOLVING,
-  }
-
+  private final SnackbarHelper snackbarHelper = new SnackbarHelper();
+  private final CloudAnchorManager cloudManager = new CloudAnchorManager();
   // Sceneform handles the rendering.
   private ArFragment arFragment;
   private PointCloudNode pointCloudNode;
   private ModelRenderable andyRenderable;
   private AnchorNode anchorNode;
-
-
-  private final SnackbarHelper snackbarHelper = new SnackbarHelper();
-
+  private CompletableFuture<Material> material;
+  private Map<String, Node> nodes = new HashMap<>();
   private Button hostButton;
   private Button resolveButton;
   private TextView roomCodeText;
 
   // Cloud Anchor Components.
   private FirebaseManager firebaseManager;
-  private final CloudAnchorManager cloudManager = new CloudAnchorManager();
   private HostResolveMode currentMode;
   private RoomCodeAndCloudAnchorIdListener hostListener;
 
+  /**
+   * Returns {@code true} if and only if the hit can be used to create an Anchor reliably.
+   */
+  private static boolean shouldCreateAnchorWithHit(HitResult hit) {
+    Trackable trackable = hit.getTrackable();
+    if (trackable instanceof Plane) {
+      // Check if the hit was within the plane's polygon.
+      return ((Plane) trackable).isPoseInPolygon(hit.getHitPose());
+    } else if (trackable instanceof Point) {
+      // Check if the hit was against an oriented point.
+      return ((Point) trackable).getOrientationMode() == OrientationMode.ESTIMATED_SURFACE_NORMAL;
+    }
+    return false;
+  }
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -120,33 +142,88 @@ public class CloudAnchorActivity extends AppCompatActivity {
                       throwable.getMessage());
               return null;
             });
+
+    material = MaterialFactory.makeOpaqueWithColor(this, new Color(.7f, 0, .5f));
   }
 
 
   private boolean onTap(HitTestResult hitTestResult, MotionEvent motionEvent) {
 
+    // Only process taps when hosting.
+    if (currentMode != HostResolveMode.HOSTING) {
+      return false;
+    }
+
     Frame frame = arFragment.getArSceneView().getArFrame();
     TrackingState cameraTrackingState = frame.getCamera().getTrackingState();
     // Only handle a tap if the anchor is currently null, the queued tap is non-null and the
     // camera is currently tracking.
-    if (anchorNode == null
-            && motionEvent != null
-            && cameraTrackingState == TrackingState.TRACKING) {
+    if (motionEvent != null && cameraTrackingState == TrackingState.TRACKING) {
       Preconditions.checkState(
               currentMode == HostResolveMode.HOSTING,
               "We should only be creating an anchor in hosting mode.");
       for (HitResult hit : frame.hitTest(motionEvent)) {
         if (shouldCreateAnchorWithHit(hit)) {
           Anchor newAnchor = hit.createAnchor();
-          Preconditions.checkNotNull(hostListener, "The host listener cannot be null.");
           cloudManager.hostCloudAnchor(newAnchor, hostListener);
-          setNewAnchor(newAnchor);
-          snackbarHelper.showMessage(this, getString(R.string.snackbar_anchor_placed));
+          if (anchorNode == null) {
+            setNewAnchor(newAnchor);
+            snackbarHelper.showMessage(this, getString(R.string.snackbar_anchor_placed));
+          } else {
+            placeCube(hit.getHitPose());
+          }
           return true; // Only handle the first valid hit.
         }
       }
     }
     return false;
+  }
+
+  private Node makeCube(String name, Vector3 position) {
+    if (!material.isDone()) {
+      return null;
+    }
+    Renderable cube =
+            ShapeFactory.makeCube(new Vector3(.1f, .1f, .1f), Vector3.zero(), material.getNow(null));
+
+    Node node = new Node();
+    node.setParent(anchorNode);
+    node.setName(name);
+    node.setLocalPosition(position);
+    node.setRenderable(cube);
+
+    return node;
+  }
+
+  private void placeCube(Pose pose) {
+    if (!material.isDone()) {
+      return;
+    }
+    Renderable cube =
+            ShapeFactory.makeCube(new Vector3(.1f, .1f, .1f), Vector3.zero(), material.getNow(null));
+
+    TransformableNode node = new TransformableNode(arFragment.getTransformationSystem());
+      node.setParent(anchorNode);
+    node.setWorldPosition(new Vector3(
+            pose.tx(), pose.ty(), pose.tz()));
+    node.setWorldRotation(new Quaternion(
+            pose.qx(), pose.qy(), pose.qz(), pose.qw()
+    ));
+    node.setRenderable(cube);
+
+    String name = "Cube_" + nodes.size();
+    node.setName(name);
+    nodes.put(name, node);
+    storePositions();
+  }
+
+  private void storePositions() {
+    List<Pair<String, Vector3>> positions = new ArrayList<>();
+    for (Node node : anchorNode.getChildren()) {
+      Vector3 p = node.getLocalPosition();
+      positions.add(new Pair<>(node.getName(), p));
+    }
+    firebaseManager.storeRelativePositions(Long.parseLong(roomCodeText.getText().toString()), positions);
   }
 
   @Override
@@ -161,28 +238,20 @@ public class CloudAnchorActivity extends AppCompatActivity {
     }
   }
 
-  /**
-   * Returns {@code true} if and only if the hit can be used to create an Anchor reliably.
-   */
-  private static boolean shouldCreateAnchorWithHit(HitResult hit) {
-    Trackable trackable = hit.getTrackable();
-    if (trackable instanceof Plane) {
-      // Check if the hit was within the plane's polygon.
-      return ((Plane) trackable).isPoseInPolygon(hit.getHitPose());
-    } else if (trackable instanceof Point) {
-      // Check if the hit was against an oriented point.
-      return ((Point) trackable).getOrientationMode() == OrientationMode.ESTIMATED_SURFACE_NORMAL;
-    }
-    return false;
-  }
-
   private void onFrame(FrameTime frameTime) {
     arFragment.onUpdate(frameTime);
     Frame frame = arFragment.getArSceneView().getArFrame();
+
+    if (frame == null) {
+      return;
+    }
+
     Camera camera = frame.getCamera();
     Collection<Anchor> updatedAnchors = frame.getUpdatedAnchors();
     TrackingState cameraTrackingState = camera.getTrackingState();
 
+
+    cloudManager.setSession(arFragment.getArSceneView().getSession());
     // Notify the cloudManager of all the updates.
     cloudManager.onUpdate(updatedAnchors);
 
@@ -205,21 +274,57 @@ public class CloudAnchorActivity extends AppCompatActivity {
    */
   private void setNewAnchor(Anchor newAnchor) {
 
-    AnchorNode newAnchorNode = new AnchorNode(newAnchor);
 
-    if (anchorNode != null) {
-      anchorNode.getAnchor().detach();
-      for (Node node : anchorNode.getChildren()) {
-        node.setParent(newAnchorNode);
+    AnchorNode newAnchorNode = null;
+
+    if (anchorNode != null && newAnchor != null) {
+      // Create a new anchor node and move the children over.
+      newAnchorNode = new AnchorNode(newAnchor);
+      newAnchorNode.setParent(arFragment.getArSceneView().getScene());
+      List<Node> children = new ArrayList<>(anchorNode.getChildren());
+      for (Node child : children) {
+        child.setParent(newAnchorNode);
       }
-      anchorNode.setParent(null);
-    } else {
+    } else if (anchorNode == null && newAnchor != null) {
+      // First anchor node created, add Andy as a child.
+      newAnchorNode = new AnchorNode(newAnchor);
+      newAnchorNode.setParent(arFragment.getArSceneView().getScene());
+
       Node andy = new Node();
       andy.setRenderable(andyRenderable);
       andy.setParent(newAnchorNode);
+
+      if (arFragment.getArSceneView().isDebugEnabled()) {
+        // Create node to display the bounds of the andy
+        Node boundsNode = new Node();
+        boundsNode.setParent(andy);
+        MaterialFactory.makeTransparentWithColor(this, new Color(0.8f, 0.8f, 0.8f, 0.4f))
+                .thenAccept(
+                        material -> {
+                          Box box = (Box) andyRenderable.getCollisionShape();
+                          Renderable renderable =
+                                  ShapeFactory.makeCube(box.getSize(), box.getCenter(), material);
+                          renderable.setCollisionShape(null);
+                          boundsNode.setRenderable(renderable);
+                        });
+      }
+    } else {
+      // Just clean up the anchor node.
+      if (anchorNode != null && anchorNode.getAnchor() != null) {
+        anchorNode.getAnchor().detach();
+        anchorNode.setParent(null);
+        anchorNode = null;
+      }
     }
+
     anchorNode = newAnchorNode;
-    anchorNode.setParent(arFragment.getArSceneView().getScene());
+
+    // Last step is to reparent the child objects
+    for (Node n : nodes.values()) {
+      if (n.getParent() != anchorNode) {
+        n.setParent(anchorNode);
+      }
+    }
   }
 
   /**
@@ -309,6 +414,33 @@ public class CloudAnchorActivity extends AppCompatActivity {
                         setNewAnchor(anchor);
                       });
             });
+
+    firebaseManager.registerLocalPositionListener(roomCode,
+            this::updateLocalPositions);
+
+  }
+
+  private void updateLocalPositions(List<Pair<String, Vector3>> positions) {
+
+    for (Pair<String, Vector3> pos : positions) {
+      String name = pos.first;
+      Vector3 lp = pos.second;
+
+      Node n = anchorNode == null ? null : anchorNode.findByName(name);
+      if (n != null) {
+        n.setLocalPosition(lp);
+      } else {
+        n = makeCube(name, lp);
+        nodes.put(name, n);
+
+      }
+    }
+  }
+
+  private enum HostResolveMode {
+    NONE,
+    HOSTING,
+    RESOLVING,
   }
 
   /**
@@ -351,11 +483,13 @@ public class CloudAnchorActivity extends AppCompatActivity {
                 CloudAnchorActivity.this, getString(R.string.snackbar_host_error, cloudState));
         return;
       }
-      Preconditions.checkState(
-              cloudAnchorId == null, "The cloud anchor ID cannot have been set before.");
-      cloudAnchorId = anchor.getCloudAnchorId();
-      setNewAnchor(anchor);
-      checkAndMaybeShare();
+      if (cloudAnchorId == null) {
+        cloudAnchorId = anchor.getCloudAnchorId();
+        runOnUiThread(() -> {
+          setNewAnchor(anchor);
+          checkAndMaybeShare();
+        });
+      }
     }
 
     private void checkAndMaybeShare() {
@@ -363,6 +497,7 @@ public class CloudAnchorActivity extends AppCompatActivity {
         return;
       }
       firebaseManager.storeAnchorIdInRoom(roomCode, cloudAnchorId);
+      storePositions();
       snackbarHelper.showMessageWithDismiss(
               CloudAnchorActivity.this, getString(R.string.snackbar_cloud_id_shared));
     }
