@@ -19,7 +19,7 @@ import com.google.ar.core.Config;
 import com.google.ar.core.Session;
 import com.google.ar.sceneform.ux.ArFragment;
 
-
+/** Extended ArFragment to enable cloud anchors mode for ARCore. */
 public class CloudAnchorArFragment extends ArFragment {
   @Override
   protected Config getSessionConfiguration(Session session) {
