@@ -16,4 +16,5 @@
 -->
 <resources>
   <string name="app_name">AugImg Java</string>
+  <string name="fit_image_to_scan">Fit image to scan</string>
 </resources>

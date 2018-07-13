@@ -1,6 +1,6 @@
 # This file uses centimeters as units for non-parametric coordinates.
-
-g default
+mtllib andy.mtl
+g andy
 v 0.036531 0.203676 -0.001768
 v 0.035000 0.204560 -0.002500
 v 0.033469 0.205443 -0.001768

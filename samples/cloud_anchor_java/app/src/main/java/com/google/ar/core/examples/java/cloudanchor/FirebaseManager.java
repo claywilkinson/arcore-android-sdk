@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,9 @@ package com.google.ar.core.examples.java.cloudanchor;
 
 import android.content.Context;
 import android.util.Log;
+import android.util.Pair;
+
+import com.google.ar.sceneform.math.Vector3;
 import com.google.common.base.Preconditions;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.database.DataSnapshot;
@@ -28,10 +31,14 @@ import com.google.firebase.database.MutableData;
 import com.google.firebase.database.Transaction;
 import com.google.firebase.database.ValueEventListener;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /** A helper class to manage all communications with Firebase. */
 class FirebaseManager {
   private static final String TAG =
       CloudAnchorActivity.class.getSimpleName() + "." + FirebaseManager.class.getSimpleName();
+
 
   /** Listener for a new room code. */
   interface RoomCodeListener {
@@ -48,8 +55,12 @@ class FirebaseManager {
 
     /** Invoked when a new cloud anchor ID is available. */
     void onNewCloudAnchorId(String cloudAnchorId);
-  }
 
+   }
+
+  interface LocalPositionListener {
+    void onLocalPositions(List<Pair<String,Vector3>> positions);
+  }
   // Names of the nodes used in the Firebase Database
   private static final String ROOT_FIREBASE_HOTSPOTS = "hotspot_list";
   private static final String ROOT_LAST_ROOM_CODE = "last_room_code";
@@ -59,12 +70,14 @@ class FirebaseManager {
   private static final String KEY_ANCHOR_ID = "hosted_anchor_id";
   private static final String KEY_TIMESTAMP = "updated_at_timestamp";
   private static final String DISPLAY_NAME_VALUE = "Android EAP Sample";
+  private static final String KEY_LOCAL_POSITIONS = "local_positions";
 
   private final FirebaseApp app;
   private final DatabaseReference hotspotListRef;
   private final DatabaseReference roomCodeRef;
   private DatabaseReference currentRoomRef = null;
   private ValueEventListener currentRoomListener = null;
+  private ValueEventListener currentPositionListener;
 
   /**
    * Default constructor for the FirebaseManager.
@@ -124,7 +137,16 @@ class FirebaseManager {
     DatabaseReference roomRef = hotspotListRef.child(String.valueOf(roomCode));
     roomRef.child(KEY_DISPLAY_NAME).setValue(DISPLAY_NAME_VALUE);
     roomRef.child(KEY_ANCHOR_ID).setValue(cloudAnchorId);
-    roomRef.child(KEY_TIMESTAMP).setValue(Long.valueOf(System.currentTimeMillis()));
+    roomRef.child(KEY_TIMESTAMP).setValue(System.currentTimeMillis());
+  }
+
+  void storeRelativePositions(long roomCode, List<Pair<String, Vector3>> positions) {
+    Preconditions.checkNotNull(app, "Firebase App was null");
+    DatabaseReference roomRef = hotspotListRef.child(String.valueOf(roomCode));
+    DatabaseReference positionsReference = roomRef.child(KEY_LOCAL_POSITIONS);
+    for(Pair<String,Vector3> pos : positions) {
+      positionsReference.child(pos.first).setValue(pos.second);
+    }
   }
 
   /**
@@ -156,6 +178,33 @@ class FirebaseManager {
     currentRoomRef.addValueEventListener(currentRoomListener);
   }
 
+  public void registerLocalPositionListener(Long roomCode, LocalPositionListener listener) {
+
+
+    Preconditions.checkNotNull(app, "Firebase App was null");
+    clearPositionListener();
+    currentRoomRef = hotspotListRef.child(String.valueOf(roomCode));
+    currentPositionListener =
+            new ValueEventListener() {
+              @Override
+              public void onDataChange(DataSnapshot dataSnapshot) {
+                if (dataSnapshot.child(KEY_LOCAL_POSITIONS).getChildrenCount() > 0) {
+                  ArrayList<Pair<String, Vector3>> positions = new ArrayList<>();
+                  for(DataSnapshot pos : dataSnapshot.child(KEY_LOCAL_POSITIONS).getChildren()) {
+                    positions.add(new Pair<>(pos.getKey(), pos.getValue(Vector3.class)));
+                  }
+                  listener.onLocalPositions(positions);
+                }
+              }
+
+              @Override
+              public void onCancelled(DatabaseError databaseError) {
+                Log.w(TAG, "The Firebase operation was cancelled.", databaseError.toException());
+              }
+            };
+    currentRoomRef.addValueEventListener(currentPositionListener);
+  }
+
   /**
    * Resets the current room listener registered using {@link #registerNewListenerForRoom(Long,
    * CloudAnchorIdListener)}.
@@ -165,6 +214,12 @@ class FirebaseManager {
       currentRoomRef.removeEventListener(currentRoomListener);
       currentRoomListener = null;
       currentRoomRef = null;
+    }
+  }
+  void clearPositionListener() {
+    if (currentPositionListener != null && currentRoomRef != null) {
+      currentRoomRef.removeEventListener(currentPositionListener);
+      currentPositionListener = null;
     }
   }
 }

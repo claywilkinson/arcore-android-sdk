@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -72,7 +72,9 @@ class CloudAnchorManager {
 
   /** Should be called with the updated anchors available after a {@link Session#update()} call. */
   synchronized void onUpdate(Collection<Anchor> updatedAnchors) {
-    Preconditions.checkNotNull(session, "The session cannot be null.");
+   if(session == null) {
+     return;
+   }
     for (Anchor anchor : updatedAnchors) {
       if (pendingAnchors.containsKey(anchor)) {
         CloudAnchorState cloudState = anchor.getCloudAnchorState();
