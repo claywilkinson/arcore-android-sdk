@@ -87,10 +87,6 @@ public class PointCloudNode extends Node {
       int vertexPerFace = 3;
 
       // draw a triangle per face (4 triangles) per feature.
-      // bottom 0 1 2
-      // side  0,3,1
-      // side 1,3,2
-      // side 2,3,0
       int indexPerFeature = numFaces * vertexPerFace;
 
       int numIndices = numFeatures * indexPerFeature;
@@ -116,23 +112,27 @@ public class PointCloudNode extends Node {
         feature.y = buf.get(i * 4 + 1);
         feature.z = buf.get(i * 4 + 2);
 
+        // Top point
         p[0].x = feature.x;
-        p[0].y = feature.y;
-        p[0].z = feature.z + POINT_DELTA;
+        p[0].y = feature.y + POINT_DELTA;
+        p[0].z = feature.z;
 
-        p[1].x = feature.x + POINT_DELTA;
+        // left pt
+        p[1].x = feature.x - POINT_DELTA;
         p[1].y = feature.y;
-        p[1].z = feature.z + POINT_DELTA;
+        p[1].z = feature.z - POINT_DELTA;
 
-        p[2].x = feature.x - POINT_DELTA;
+        // front point
+        p[2].x = feature.x;
         p[2].y = feature.y;
         p[2].z = feature.z + POINT_DELTA;
 
-        p[3].x = feature.x;
-        p[3].y = feature.y + POINT_DELTA;
-        p[3].z = feature.z;
+        // right pt
+        p[3].x = feature.x + POINT_DELTA;
+        p[3].y = feature.y;
+        p[3].z = feature.z - POINT_DELTA;
 
-        int vertexBase = i * vertexPerFeature;
+      int vertexBase = i * vertexPerFeature;
 
         // Create the vertices.  Set the tangent and UV to quiet warnings about material requirements.
         ptbuffer[vertexBase] = Vertex.builder().setPosition(p[0])
@@ -156,21 +156,28 @@ public class PointCloudNode extends Node {
 
         int featureBase = i * indexPerFeature;
 
-        indexbuffer[featureBase] = vertexBase;
-        indexbuffer[featureBase + 1] = vertexBase + 1;
-        indexbuffer[featureBase + 2] = vertexBase + 2;
+        // The indices of the triangles need to be listed counter clockwise as
+        // appears when facing the front side of the face.
 
+        // left 0 1 2
+         indexbuffer[featureBase + 2] = vertexBase;
+        indexbuffer[featureBase] = vertexBase + 1;
+        indexbuffer[featureBase + 1] = vertexBase + 2;
+
+        // right  0 2 3
         indexbuffer[featureBase + 3] = vertexBase;
-        indexbuffer[featureBase + 4] = vertexBase + 3;
-        indexbuffer[featureBase + 5] = vertexBase + 1;
+        indexbuffer[featureBase + 4] = vertexBase + 2;
+        indexbuffer[featureBase + 5] = vertexBase + 3;
 
-        indexbuffer[featureBase + 6] = vertexBase + 1;
+        // back  0 3 1
+        indexbuffer[featureBase + 6] = vertexBase;
         indexbuffer[featureBase + 7] = vertexBase + 3;
-        indexbuffer[featureBase + 8] = vertexBase + 2;
+        indexbuffer[featureBase + 8] = vertexBase + 1;
 
-        indexbuffer[featureBase + 9] = vertexBase + 2;
-        indexbuffer[featureBase + 10] = vertexBase + 3;
-        indexbuffer[featureBase + 11] = vertexBase;
+        // bottom  1,2,3
+        indexbuffer[featureBase + 9] = vertexBase + 1;
+        indexbuffer[featureBase + 10] = vertexBase + 2;
+        indexbuffer[featureBase + 11] = vertexBase + 3;
       }
 
       RenderableDefinition.Submesh submesh =
