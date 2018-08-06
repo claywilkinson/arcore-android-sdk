@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#include <android/asset_manager.h>
+#include <android/asset_manager_jni.h>
 #include <jni.h>
 
 #include "computer_vision_application.h"
@@ -25,7 +27,7 @@
 extern "C" {
 
 namespace {
-// maintain a reference to the JVM so we can use it later.
+// Maintain a reference to the JVM so we can use it later.
 static JavaVM *g_vm = nullptr;
 
 inline jlong jptr(computer_vision::ComputerVisionApplication
@@ -45,8 +47,9 @@ jint JNI_OnLoad(JavaVM *vm, void *) {
 }
 
 JNI_METHOD(jlong, createNativeApplication)
-(JNIEnv *env, jclass /*clazz*/) {
-  return jptr(new computer_vision::ComputerVisionApplication());
+(JNIEnv *env, jclass, jobject j_asset_manager) {
+  AAssetManager *asset_manager = AAssetManager_fromJava(env, j_asset_manager);
+  return jptr(new computer_vision::ComputerVisionApplication(asset_manager));
 }
 
 JNI_METHOD(void, destroyNativeApplication)
@@ -92,6 +95,37 @@ JNIEnv *GetJniEnv() {
 jclass FindClass(const char *classname) {
   JNIEnv *env = GetJniEnv();
   return env->FindClass(classname);
+}
+
+JNI_METHOD(jstring, getCameraConfigLabel)
+(JNIEnv *env, jclass, jlong native_application, jboolean is_low_resolution) {
+  auto label =
+      native(native_application)->getCameraConfigLabel(is_low_resolution);
+  return env->NewStringUTF(label.c_str());
+}
+
+JNI_METHOD(jint, setCameraConfig)
+(JNIEnv *env, jclass, jlong native_application, jboolean is_low_resolution) {
+  ArStatus status =
+      native(native_application)->setCameraConfig(is_low_resolution);
+  return static_cast<jint>(status);
+}
+
+JNI_METHOD(jstring, getCameraIntrinsicsText)
+(JNIEnv *env, jclass, jlong native_application, jboolean for_gpu_texture) {
+  auto label =
+      native(native_application)->GetCameraIntrinsicsText(for_gpu_texture);
+  return env->NewStringUTF(label.c_str());
+}
+
+JNI_METHOD(void, setFocusMode)
+(JNIEnv *, jclass, jlong native_application, jboolean enable_auto_focus) {
+  native(native_application)->SetFocusMode(enable_auto_focus);
+}
+
+JNI_METHOD(jboolean, getFocusMode)
+(JNIEnv *, jclass, jlong native_application) {
+  return native(native_application)->GetFocusMode();
 }
 
 }  // extern "C"
