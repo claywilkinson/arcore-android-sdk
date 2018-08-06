@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -14,6 +14,7 @@
  */
 package com.google.ar.core.examples.java.computervision;
 
+
 import java.nio.ByteBuffer;
 
 /** Detects edges from input YUV image. */
@@ -22,16 +23,18 @@ public class EdgeDetector {
 
   private static final int SOBEL_EDGE_THRESHOLD = 128 * 128;
 
-  /**
-   * Process a grayscale image using the Sobel edge detector.
-   *
-   * @param width image width.
-   * @param height image height.
-   * @param stride image stride (number of bytes per row, equals to width if no row padding).
-   * @param input bytes of the image, assumed single channel grayscale of size [stride * height].
-   * @return bytes of the processed image, where the byte value is the strength of the edge at that
-   *     pixel. Number of bytes is width * height, row padding (if any) is removed.
-   */
+
+
+    /**
+     * Process a grayscale image using the Sobel edge detector.
+     *
+     * @param width image width.
+     * @param height image height.
+     * @param stride image stride (number of bytes per row, equals to width if no row padding).
+     * @param input bytes of the image, assumed single channel grayscale of size [stride * height].
+     * @return bytes of the processed image, where the byte value is the strength of the edge at that
+     *     pixel. Number of bytes is width * height, row padding (if any) is removed.
+     */
   public synchronized ByteBuffer detect(int width, int height, int stride, ByteBuffer input) {
     // Reallocate input byte array if its size is different from the required size.
     if (stride * height != inputPixels.length) {
