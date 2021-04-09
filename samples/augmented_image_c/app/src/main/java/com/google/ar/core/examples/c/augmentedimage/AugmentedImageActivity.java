@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,17 +21,26 @@ import android.net.Uri;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
-import android.support.v7.app.AppCompatActivity;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
 import com.bumptech.glide.Glide;
 import com.bumptech.glide.RequestManager;
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
-/** This is a simple example that shows how to use ARCore AugmentedImage C API. */
+/**
+ * This is a simple example that shows how to use ARCore AugmentedImage C API.
+ *
+ * <p>In this example, we assume all images are static or moving slowly with a large occupation of
+ * the screen. If the target is actively moving, we recommend to check
+ * ArAugmentedImage_getTrackingMethod() and render only when the tracking method equals to
+ * AR_AUGMENTED_IMAGE_TRACKING_METHOD_FULL_TRACKING. See details in <a
+ * href="https://developers.google.com/ar/develop/c/augmented-images/">Recognize and Augment
+ * Images</a>.
+ */
 public class AugmentedImageActivity extends AppCompatActivity
     implements GLSurfaceView.Renderer, DisplayManager.DisplayListener {
   private static final String TAG = AugmentedImageActivity.class.getSimpleName();
@@ -59,6 +68,7 @@ public class AugmentedImageActivity extends AppCompatActivity
     surfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0); // Alpha used for plane blending.
     surfaceView.setRenderer(this);
     surfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+    surfaceView.setWillNotDraw(false);
 
     JniInterface.assetManager = getAssets();
     nativeApplication = JniInterface.createNativeApplication(getAssets());
@@ -160,6 +170,7 @@ public class AugmentedImageActivity extends AppCompatActivity
 
   @Override
   public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+    super.onRequestPermissionsResult(requestCode, permissions, results);
     if (!CameraPermissionHelper.hasCameraPermission(this)) {
       Toast.makeText(this, "Camera permission is needed to run this application", Toast.LENGTH_LONG)
           .show();

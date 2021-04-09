@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,75 +19,27 @@
 #include "cpu_image_renderer.h"
 
 #include <stdint.h>
+
 #include <algorithm>
 
 namespace computer_vision {
 namespace {
-// Positions of the quad vertices in clip space (X, Y, Z).
+// Positions of the quad vertices in clip space (X, Y).
 const GLfloat kVertices[] = {
-    -1.0f, -1.0f, 0.0f, -1.0f, +1.0f, 0.0f,
-    +1.0f, -1.0f, 0.0f, +1.0f, +1.0f, 0.0f,
-};
-
-// UVs of the quad vertices (S, T)
-const GLfloat kUvs[] = {
-    0.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 0.0f,
+    -1.0f, -1.0f, +1.0f, -1.0f, -1.0f, +1.0f, +1.0f, +1.0f,
 };
 
 constexpr int kSobelEdgeThreshold = 128 * 128;
-constexpr int kCoordsPerVertex = 3;
+constexpr int kCoordsPerVertex = 2;
 constexpr int kTexCoordsPerVertex = 2;
-constexpr int kTextureCount = 4;
 constexpr char kVertexShaderFilename[] = "shaders/cpu_image.vert";
 constexpr char kFragmentShaderFilename[] = "shaders/cpu_image.frag";
 
-bool GetNdkImageProperties(const AImage* ndk_image, int32_t* out_format,
-                           int32_t* out_width, int32_t* out_height,
-                           int32_t* out_plane_num, int32_t* out_stride) {
-  if (ndk_image == nullptr) {
-    return false;
-  }
-  media_status_t status = AImage_getFormat(ndk_image, out_format);
-  if (status != AMEDIA_OK) {
-    return false;
-  }
-
-  status = AImage_getWidth(ndk_image, out_width);
-  if (status != AMEDIA_OK) {
-    return false;
-  }
-
-  status = AImage_getHeight(ndk_image, out_height);
-  if (status != AMEDIA_OK) {
-    return false;
-  }
-
-  status = AImage_getNumberOfPlanes(ndk_image, out_plane_num);
-  if (status != AMEDIA_OK) {
-    return false;
-  }
-
-  status = AImage_getPlaneRowStride(ndk_image, 0, out_stride);
-  if (status != AMEDIA_OK) {
-    return false;
-  }
-
-  return true;
-}
-
-bool DetectEdge(const AImage* ndk_image, int32_t width, int32_t height,
-                int32_t stride, uint8_t* output_pixels) {
-  if (ndk_image == nullptr || output_pixels == nullptr) {
-    return false;
-  }
-
-  uint8_t* input_pixels = nullptr;
-  int length = 0;
-  media_status_t status =
-      AImage_getPlaneData(ndk_image, 0, &input_pixels, &length);
-  if (status != AMEDIA_OK) {
-    return false;
-  }
+void DetectEdge(const ArSession* session, const ArImage* image, int32_t width,
+                int32_t height, int32_t stride, uint8_t* output_pixels) {
+  const uint8_t* input_pixels = nullptr;
+  int32_t length = 0;
+  ArImage_getPlaneData(session, image, 0, &input_pixels, &length);
 
   // Detect edges.
   for (int j = 1; j < height - 1; j++) {
@@ -124,14 +76,13 @@ bool DetectEdge(const AImage* ndk_image, int32_t width, int32_t height,
       }
     }
   }
-  return true;
 }
 
 }  // namespace
 
 void CpuImageRenderer::InitializeGlContent(AAssetManager* asset_manager) {
-  GLuint textures[kTextureCount];
-  glGenTextures(kTextureCount, textures);
+  GLuint textures[2];
+  glGenTextures(2, textures);
 
   texture_id_ = textures[0];
   glBindTexture(GL_TEXTURE_EXTERNAL_OES, texture_id_);
@@ -142,18 +93,6 @@ void CpuImageRenderer::InitializeGlContent(AAssetManager* asset_manager) {
 
   overlay_texture_id_ = textures[1];
   glBindTexture(GL_TEXTURE_2D, overlay_texture_id_);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-
-  u_texture_id_ = textures[2];
-  glBindTexture(GL_TEXTURE_2D, u_texture_id_);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-
-  v_texture_id_ = textures[3];
-  glBindTexture(GL_TEXTURE_2D, v_texture_id_);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -177,29 +116,35 @@ void CpuImageRenderer::InitializeGlContent(AAssetManager* asset_manager) {
 }
 
 void CpuImageRenderer::Draw(const ArSession* session, const ArFrame* frame,
-                            const AImage* ndk_image, float screen_aspect_ratio,
+                            const ArImage* image, float screen_aspect_ratio,
                             int display_rotation, float splitter_pos) {
-  // Try to get the NDK image and get the post-processed edge detection image.
-  int32_t format = 0, width = 0, height = 0, num_plane = 0, stride = 0;
+  // Try to get the ar image and get the post-processed edge detection image.
+  ArImageFormat format;
+  int32_t width = 0, height = 0, num_plane = 0, stride = 0;
   bool is_valid_cpu_image = false;
-  if (ndk_image != nullptr) {
-    if (GetNdkImageProperties(ndk_image, &format, &width, &height, &num_plane,
-                              &stride)) {
-      if (format == AIMAGE_FORMAT_YUV_420_888) {
-        if (width > 0 || height > 0 || num_plane > 0 || stride > 0) {
-          if (processed_image_bytes_grayscale_ == nullptr ||
-              stride * height > cpu_image_buffer_size_) {
-            cpu_image_buffer_size_ = stride * height;
-            processed_image_bytes_grayscale_ =
-                std::unique_ptr<uint8_t[]>(new uint8_t[cpu_image_buffer_size_]);
-          }
-          DetectEdge(ndk_image, width, height, stride,
-                     processed_image_bytes_grayscale_.get());
-          is_valid_cpu_image = true;
+  // No need to compute edge detection as it is not being displayed if the
+  // splitter position is one.
+  if ((image != nullptr) && (splitter_pos < 1.0)) {
+    ArImage_getFormat(session, image, &format);
+    ArImage_getWidth(session, image, &width);
+    ArImage_getHeight(session, image, &height);
+    ArImage_getNumberOfPlanes(session, image, &num_plane);
+    ArImage_getPlaneRowStride(session, image, 0, &stride);
+
+    if (format == AR_IMAGE_FORMAT_YUV_420_888) {
+      if (width > 0 || height > 0 || num_plane > 0 || stride > 0) {
+        if (processed_image_bytes_grayscale_ == nullptr ||
+            stride * height > cpu_image_buffer_size_) {
+          cpu_image_buffer_size_ = stride * height;
+          processed_image_bytes_grayscale_ =
+              std::unique_ptr<uint8_t[]>(new uint8_t[cpu_image_buffer_size_]);
         }
-      } else {
-        LOGE("Expected image in YUV_420_888 format.");
+        DetectEdge(session, image, width, height, stride,
+                   processed_image_bytes_grayscale_.get());
+        is_valid_cpu_image = true;
       }
+    } else {
+      LOGE("Expected image in YUV_420_888 format.");
     }
   }
 
@@ -211,11 +156,16 @@ void CpuImageRenderer::Draw(const ArSession* session, const ArFrame* frame,
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_EXTERNAL_OES, texture_id_);
 
-  UpdateTextureCoordinates(width, height, screen_aspect_ratio,
-                           display_rotation);
-  // Update GPU image texture coordinates.
-  ArFrame_transformDisplayUvCoords(session, frame, kNumVertices * 2, kUvs,
-                                   transformed_tex_coord_);
+  // Update CPU image & GPU texture coordinates.
+  ArFrame_transformCoordinates2d(
+      session, frame, AR_COORDINATES_2D_OPENGL_NORMALIZED_DEVICE_COORDINATES,
+      kNumVertices, kVertices, AR_COORDINATES_2D_IMAGE_NORMALIZED,
+      transformed_img_coord_);
+  ArFrame_transformCoordinates2d(
+      session, frame, AR_COORDINATES_2D_OPENGL_NORMALIZED_DEVICE_COORDINATES,
+      kNumVertices, kVertices, AR_COORDINATES_2D_TEXTURE_NORMALIZED,
+      transformed_tex_coord_);
+
   if (is_valid_cpu_image) {
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, overlay_texture_id_);
@@ -252,38 +202,6 @@ void CpuImageRenderer::Draw(const ArSession* session, const ArFrame* frame,
   glDepthMask(GL_TRUE);
   glEnable(GL_DEPTH_TEST);
   util::CheckGlError("CpuImageRenderer::Draw() error");
-}
-
-void CpuImageRenderer::UpdateTextureCoordinates(int32_t image_width,
-                                                int32_t image_height,
-                                                float screen_aspect_ratio,
-                                                int display_rotation) {
-  // Crop the CPU image to fit the screen aspect ratio.
-  float image_aspect_ratio = static_cast<float>(image_width) / image_height;
-  float cropped_width, cropped_height;
-  if (screen_aspect_ratio < image_aspect_ratio) {
-    cropped_width = image_height * screen_aspect_ratio;
-    cropped_height = image_height;
-  } else {
-    cropped_width = image_width;
-    cropped_height = image_width / screen_aspect_ratio;
-  }
-
-  float u = (image_width - cropped_width) / image_width / 2.f;
-  float v = (image_height - cropped_height) / image_height / 2.f;
-  // 4 possible display rotation.
-  float tex_coords[4][kNumVertices * 2] = {
-      {u, 1 - v, u, v, 1 - u, 1 - v, 1 - u, v},  // Surface.ROTATION_0
-      {1 - u, 1 - v, u, 1 - v, 1 - u, v, u, v},  // Surface.ROTATION_90
-      {1 - u, v, 1 - u, 1 - v, u, v, u, 1 - v},  // Surface.ROTATION_180
-      {u, v, 1 - u, v, u, 1 - v, 1 - u, 1 - v}   // Surface.ROTATION_270
-  };
-
-  if (display_rotation < 0 || display_rotation > 3) {
-    display_rotation = 0;  // default;
-  }
-  std::copy(tex_coords[display_rotation], tex_coords[display_rotation] + 8,
-            transformed_img_coord_);
 }
 
 GLuint CpuImageRenderer::GetTextureId() const { return texture_id_; }

@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,15 +23,9 @@
 
 namespace augmented_image {
 namespace {
-// Positions of the quad vertices in clip space (X, Y, Z).
+// Positions of the quad vertices in clip space (X, Y).
 const GLfloat kVertices[] = {
-    -1.0f, -1.0f, 0.0f, +1.0f, -1.0f, 0.0f,
-    -1.0f, +1.0f, 0.0f, +1.0f, +1.0f, 0.0f,
-};
-
-// UVs of the quad vertices (S, T)
-const GLfloat kUvs[] = {
-    0.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+    -1.0f, -1.0f, +1.0f, -1.0f, -1.0f, +1.0f, +1.0f, +1.0f,
 };
 
 constexpr char kVertexShaderFilename[] = "shaders/screenquad.vert";
@@ -56,9 +50,7 @@ void BackgroundRenderer::InitializeGlContent(AAssetManager* asset_manager) {
 }
 
 void BackgroundRenderer::Draw(const ArSession* session, const ArFrame* frame) {
-  static_assert(std::extent<decltype(kUvs)>::value == kNumVertices * 2,
-                "Incorrect kUvs length");
-  static_assert(std::extent<decltype(kVertices)>::value == kNumVertices * 3,
+  static_assert(std::extent<decltype(kVertices)>::value == kNumVertices * 2,
                 "Incorrect kVertices length");
 
   // If display rotation changed (also includes view size change), we need to
@@ -66,9 +58,20 @@ void BackgroundRenderer::Draw(const ArSession* session, const ArFrame* frame) {
   int32_t geometry_changed = 0;
   ArFrame_getDisplayGeometryChanged(session, frame, &geometry_changed);
   if (geometry_changed != 0 || !uvs_initialized_) {
-    ArFrame_transformDisplayUvCoords(session, frame, kNumVertices * 2, kUvs,
-                                     transformed_uvs_);
+    ArFrame_transformCoordinates2d(
+        session, frame, AR_COORDINATES_2D_OPENGL_NORMALIZED_DEVICE_COORDINATES,
+        kNumVertices, kVertices, AR_COORDINATES_2D_TEXTURE_NORMALIZED,
+        transformed_uvs_);
     uvs_initialized_ = true;
+  }
+
+  int64_t frame_timestamp;
+  ArFrame_getTimestamp(session, frame, &frame_timestamp);
+  if (frame_timestamp == 0) {
+    // Suppress rendering if the camera did not produce the first frame yet.
+    // This is to avoid drawing possible leftover data from previous sessions if
+    // the texture is reused.
+    return;
   }
 
   glUseProgram(shader_program_);
@@ -79,7 +82,7 @@ void BackgroundRenderer::Draw(const ArSession* session, const ArFrame* frame) {
   glBindTexture(GL_TEXTURE_EXTERNAL_OES, texture_id_);
 
   glEnableVertexAttribArray(attribute_vertices_);
-  glVertexAttribPointer(attribute_vertices_, 3, GL_FLOAT, GL_FALSE, 0,
+  glVertexAttribPointer(attribute_vertices_, 2, GL_FLOAT, GL_FALSE, 0,
                         kVertices);
 
   glEnableVertexAttribArray(attribute_uvs_);

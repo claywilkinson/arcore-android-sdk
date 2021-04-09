@@ -1,5 +1,6 @@
 /*
- * Copyright 2017 Google Inc. All Rights Reserved.
+ * Copyright 2017 Google LLC
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -16,7 +17,6 @@ package com.google.ar.core.examples.java.common.helpers;
 
 import android.app.Activity;
 import android.view.View;
-import android.view.WindowManager;
 
 /** Helper to set up the Android full screen mode. */
 public final class FullScreenHelper {
@@ -41,7 +41,6 @@ public final class FullScreenHelper {
                   | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                   | View.SYSTEM_UI_FLAG_FULLSCREEN
                   | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
-      activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
   }
 }

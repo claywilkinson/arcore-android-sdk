@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2019 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,17 +16,21 @@
 
 package com.google.ar.core.examples.java.cloudanchor;
 
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
-import android.support.annotation.GuardedBy;
-import android.support.v7.app.AppCompatActivity;
+import android.os.SystemClock;
 import android.util.Log;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.annotation.GuardedBy;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.fragment.app.DialogFragment;
 import com.google.ar.core.Anchor;
 import com.google.ar.core.Anchor.CloudAnchorState;
 import com.google.ar.core.ArCoreApk;
@@ -42,10 +46,13 @@ import com.google.ar.core.PointCloud;
 import com.google.ar.core.Session;
 import com.google.ar.core.Trackable;
 import com.google.ar.core.TrackingState;
+import com.google.ar.core.examples.java.cloudanchor.PrivacyNoticeDialogFragment.HostResolveListener;
+import com.google.ar.core.examples.java.cloudanchor.PrivacyNoticeDialogFragment.NoticeDialogListener;
 import com.google.ar.core.examples.java.common.helpers.CameraPermissionHelper;
 import com.google.ar.core.examples.java.common.helpers.DisplayRotationHelper;
 import com.google.ar.core.examples.java.common.helpers.FullScreenHelper;
 import com.google.ar.core.examples.java.common.helpers.SnackbarHelper;
+import com.google.ar.core.examples.java.common.helpers.TrackingStateHelper;
 import com.google.ar.core.examples.java.common.rendering.BackgroundRenderer;
 import com.google.ar.core.examples.java.common.rendering.ObjectRenderer;
 import com.google.ar.core.examples.java.common.rendering.ObjectRenderer.BlendMode;
@@ -68,7 +75,8 @@ import javax.microedition.khronos.opengles.GL10;
  * API calls. This app only has at most one anchor at a time, to focus more on the cloud aspect of
  * anchors.
  */
-public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceView.Renderer {
+public class CloudAnchorActivity extends AppCompatActivity
+    implements GLSurfaceView.Renderer, NoticeDialogListener {
   private static final String TAG = CloudAnchorActivity.class.getSimpleName();
   private static final float[] OBJECT_COLOR = new float[] {139.0f, 195.0f, 74.0f, 255.0f};
 
@@ -101,9 +109,13 @@ public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceV
   private GestureDetector gestureDetector;
   private final SnackbarHelper snackbarHelper = new SnackbarHelper();
   private DisplayRotationHelper displayRotationHelper;
+  private final TrackingStateHelper trackingStateHelper = new TrackingStateHelper(this);
   private Button hostButton;
   private Button resolveButton;
   private TextView roomCodeText;
+  private SharedPreferences sharedPreferences;
+  private static final String PREFERENCE_FILE_KEY = "allow_sharing_images";
+  private static final String ALLOW_SHARE_IMAGES_KEY = "ALLOW_SHARE_IMAGES";
 
   @GuardedBy("singleTapLock")
   private MotionEvent queuedSingleTap;
@@ -126,7 +138,7 @@ public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceV
     surfaceView = findViewById(R.id.surfaceview);
     displayRotationHelper = new DisplayRotationHelper(this);
 
-    // Set up tap listener.
+    // Set up touch listener.
     gestureDetector =
         new GestureDetector(
             this,
@@ -154,6 +166,7 @@ public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceV
     surfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0); // Alpha used for plane blending.
     surfaceView.setRenderer(this);
     surfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+    surfaceView.setWillNotDraw(false);
     installRequested = false;
 
     // Initialize UI components.
@@ -166,12 +179,39 @@ public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceV
     // Initialize Cloud Anchor variables.
     firebaseManager = new FirebaseManager(this);
     currentMode = HostResolveMode.NONE;
+    sharedPreferences = getSharedPreferences(PREFERENCE_FILE_KEY, Context.MODE_PRIVATE);
+  }
+
+  @Override
+  protected void onDestroy() {
+    // Clear all registered listeners.
+    resetMode();
+
+    if (session != null) {
+      // Explicitly close ARCore Session to release native resources.
+      // Review the API reference for important considerations before calling close() in apps with
+      // more complicated lifecycle requirements:
+      // https://developers.google.com/ar/reference/java/arcore/reference/com/google/ar/core/Session#close()
+      session.close();
+      session = null;
+    }
+
+    super.onDestroy();
   }
 
   @Override
   protected void onResume() {
     super.onResume();
 
+    if (sharedPreferences.getBoolean(ALLOW_SHARE_IMAGES_KEY, false)) {
+      createSession();
+    }
+    snackbarHelper.showMessage(this, getString(R.string.snackbar_initial_message));
+    surfaceView.onResume();
+    displayRotationHelper.onResume();
+  }
+
+  private void createSession() {
     if (session == null) {
       Exception exception = null;
       int messageId = -1;
@@ -183,7 +223,6 @@ public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceV
           case INSTALLED:
             break;
         }
-
         // ARCore requires camera permissions to operate. If we did not yet obtain runtime
         // permission on Android M and above, now is a good time to ask the user for it.
         if (!CameraPermissionHelper.hasCameraPermission(this)) {
@@ -218,23 +257,16 @@ public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceV
 
       // Setting the session in the HostManager.
       cloudManager.setSession(session);
-      // Show the inital message only in the first resume.
-      snackbarHelper.showMessage(this, getString(R.string.snackbar_initial_message));
     }
 
     // Note that order matters - see the note in onPause(), the reverse applies here.
     try {
       session.resume();
     } catch (CameraNotAvailableException e) {
-      // In some cases (such as another camera app launching) the camera may be given to
-      // a different app instead. Handle this properly by showing a message and recreate the
-      // session at the next iteration.
       snackbarHelper.showError(this, getString(R.string.snackbar_camera_unavailable));
       session = null;
       return;
     }
-    surfaceView.onResume();
-    displayRotationHelper.onResume();
   }
 
   @Override
@@ -252,6 +284,7 @@ public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceV
 
   @Override
   public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+    super.onRequestPermissionsResult(requestCode, permissions, results);
     if (!CameraPermissionHelper.hasCameraPermission(this)) {
       Toast.makeText(this, "Camera permission is needed to run this application", Toast.LENGTH_LONG)
           .show();
@@ -376,8 +409,11 @@ public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceV
       // Handle user input.
       handleTap(frame, cameraTrackingState);
 
-      // Draw background.
+      // If frame is ready, render camera preview image to the GL surface.
       backgroundRenderer.draw(frame);
+
+      // Keep the screen unlocked while tracking, but allow it to lock when tracking stops.
+      trackingStateHelper.updateKeepScreenOnFlag(camera.getTrackingState());
 
       // If not tracking, don't draw 3d objects.
       if (cameraTrackingState == TrackingState.PAUSED) {
@@ -389,12 +425,11 @@ public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceV
       camera.getProjectionMatrix(projectionMatrix, 0, 0.1f, 100.0f);
 
       // Visualize tracked points.
-      PointCloud pointCloud = frame.acquirePointCloud();
-      pointCloudRenderer.update(pointCloud);
-      pointCloudRenderer.draw(viewMatrix, projectionMatrix);
-
-      // Application is responsible for releasing the point cloud resources after using it.
-      pointCloud.release();
+      // Use try-with-resources to automatically release the point cloud.
+      try (PointCloud pointCloud = frame.acquirePointCloud()) {
+        pointCloudRenderer.update(pointCloud);
+        pointCloudRenderer.draw(viewMatrix, projectionMatrix);
+      }
 
       // Visualize planes.
       planeRenderer.drawPlanes(
@@ -446,6 +481,14 @@ public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceV
       return;
     }
 
+    if (!sharedPreferences.getBoolean(ALLOW_SHARE_IMAGES_KEY, false)) {
+      showNoticeDialog(this::onPrivacyAcceptedForHost);
+    } else {
+      onPrivacyAcceptedForHost();
+    }
+  }
+
+  private void onPrivacyAcceptedForHost() {
     if (hostListener != null) {
       return;
     }
@@ -463,6 +506,15 @@ public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceV
       resetMode();
       return;
     }
+
+    if (!sharedPreferences.getBoolean(ALLOW_SHARE_IMAGES_KEY, false)) {
+      showNoticeDialog(this::onPrivacyAcceptedForResolve);
+    } else {
+      onPrivacyAcceptedForResolve();
+    }
+  }
+
+  private void onPrivacyAcceptedForResolve() {
     ResolveDialogFragment dialogFragment = new ResolveDialogFragment();
     dialogFragment.setOkListener(this::onRoomCodeEntered);
     dialogFragment.show(getSupportFragmentManager(), "ResolveDialog");
@@ -494,29 +546,13 @@ public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceV
     // Register a new listener for the given room.
     firebaseManager.registerNewListenerForRoom(
         roomCode,
-        (cloudAnchorId) -> {
+        cloudAnchorId -> {
           // When the cloud anchor ID is available from Firebase.
+          CloudAnchorResolveStateListener resolveListener =
+              new CloudAnchorResolveStateListener(roomCode);
+          Preconditions.checkNotNull(resolveListener, "The resolve listener cannot be null.");
           cloudManager.resolveCloudAnchor(
-              cloudAnchorId,
-              (anchor) -> {
-                // When the anchor has been resolved, or had a final error state.
-                CloudAnchorState cloudState = anchor.getCloudAnchorState();
-                if (cloudState.isError()) {
-                  Log.w(
-                      TAG,
-                      "The anchor in room "
-                          + roomCode
-                          + " could not be resolved. The error state was "
-                          + cloudState);
-                  snackbarHelper.showMessageWithDismiss(
-                      CloudAnchorActivity.this,
-                      getString(R.string.snackbar_resolve_error, cloudState));
-                  return;
-                }
-                snackbarHelper.showMessageWithDismiss(
-                    CloudAnchorActivity.this, getString(R.string.snackbar_resolve_success));
-                setNewAnchor(anchor);
-              });
+              cloudAnchorId, resolveListener, SystemClock.uptimeMillis());
         });
   }
 
@@ -525,7 +561,7 @@ public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceV
    * the room code when both are available.
    */
   private final class RoomCodeAndCloudAnchorIdListener
-      implements CloudAnchorManager.CloudAnchorListener, FirebaseManager.RoomCodeListener {
+      implements CloudAnchorManager.CloudAnchorHostListener, FirebaseManager.RoomCodeListener {
 
     private Long roomCode;
     private String cloudAnchorId;
@@ -577,5 +613,54 @@ public class CloudAnchorActivity extends AppCompatActivity implements GLSurfaceV
       snackbarHelper.showMessageWithDismiss(
           CloudAnchorActivity.this, getString(R.string.snackbar_cloud_id_shared));
     }
+  }
+
+  private final class CloudAnchorResolveStateListener
+      implements CloudAnchorManager.CloudAnchorResolveListener {
+    private final long roomCode;
+
+    CloudAnchorResolveStateListener(long roomCode) {
+      this.roomCode = roomCode;
+    }
+
+    @Override
+    public void onCloudTaskComplete(Anchor anchor) {
+      // When the anchor has been resolved, or had a final error state.
+      CloudAnchorState cloudState = anchor.getCloudAnchorState();
+      if (cloudState.isError()) {
+        Log.w(
+            TAG,
+            "The anchor in room "
+                + roomCode
+                + " could not be resolved. The error state was "
+                + cloudState);
+        snackbarHelper.showMessageWithDismiss(
+            CloudAnchorActivity.this, getString(R.string.snackbar_resolve_error, cloudState));
+        return;
+      }
+      snackbarHelper.showMessageWithDismiss(
+          CloudAnchorActivity.this, getString(R.string.snackbar_resolve_success));
+      setNewAnchor(anchor);
+    }
+
+    @Override
+    public void onShowResolveMessage() {
+      snackbarHelper.setMaxLines(4);
+      snackbarHelper.showMessageWithDismiss(
+          CloudAnchorActivity.this, getString(R.string.snackbar_resolve_no_result_yet));
+    }
+  }
+
+  public void showNoticeDialog(HostResolveListener listener) {
+    DialogFragment dialog = PrivacyNoticeDialogFragment.createDialog(listener);
+    dialog.show(getSupportFragmentManager(), PrivacyNoticeDialogFragment.class.getName());
+  }
+
+  @Override
+  public void onDialogPositiveClick(DialogFragment dialog) {
+    if (!sharedPreferences.edit().putBoolean(ALLOW_SHARE_IMAGES_KEY, true).commit()) {
+      throw new AssertionError("Could not save the user preference to SharedPreferences!");
+    }
+    createSession();
   }
 }

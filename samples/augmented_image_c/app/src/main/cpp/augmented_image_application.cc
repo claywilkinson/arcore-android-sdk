@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,8 +44,7 @@ constexpr bool kUseSingleImage = false;
 
 AugmentedImageApplication::AugmentedImageApplication(
     AAssetManager* asset_manager)
-    : asset_manager_(asset_manager) {
-}
+    : asset_manager_(asset_manager) {}
 
 AugmentedImageApplication::~AugmentedImageApplication() {
   if (ar_session_ != nullptr) {
@@ -103,6 +102,7 @@ void AugmentedImageApplication::OnResume(void* env, void* context,
     ArConfig_setAugmentedImageDatabase(ar_session_, ar_config,
                                        ar_augmented_image_database);
 
+    ArConfig_setFocusMode(ar_session_, ar_config, AR_FOCUS_MODE_AUTO);
     CHECK(ArSession_configure(ar_session_, ar_config) == AR_SUCCESS);
 
     ArAugmentedImageDatabase_destroy(ar_augmented_image_database);
@@ -198,7 +198,11 @@ void AugmentedImageApplication::OnDrawFrame(void* activity) {
   glEnable(GL_CULL_FACE);
   glEnable(GL_DEPTH_TEST);
   glEnable(GL_BLEND);
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+  // Textures are loaded with premultiplied alpha
+  // (https://developer.android.com/reference/android/graphics/BitmapFactory.Options#inPremultiplied),
+  // so we use the premultiplied alpha blend factors.
+  glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
   if (ar_session_ == nullptr) return;
 
@@ -225,11 +229,6 @@ void AugmentedImageApplication::OnDrawFrame(void* activity) {
   ArCamera_release(ar_camera);
 
   background_renderer_.Draw(ar_session_, ar_frame_);
-
-  // If the camera isn't tracking don't bother rendering other objects.
-  if (camera_tracking_state != AR_TRACKING_STATE_TRACKING) {
-    return;
-  }
 
   // Get light estimation value.
   ArLightEstimate* ar_light_estimate;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Google Inc. All Rights Reserved.
+ * Copyright 2017 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ import java.nio.IntBuffer;
  * texture, and returns pixels from the front buffer bund to texture supplied to the previous call
  * to this function. This can be done by calling submitAndAcquire() function.
  *
- * <p>(B) Asychronous method: this method utilizes multiple frame buffers and it does not block the
+ * <p>(B) Asynchronous method: this method utilizes multiple frame buffers and it does not block the
  * caller thread. This method allows you to read a texture in a lower frequency than rendering
  * frequency(Calling submitAndAcquire() in a lower frequency will result in an "old" image buffer
  * that was submitted a few frames ago). This method contains three routines: submitFrame(),

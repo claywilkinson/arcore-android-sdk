@@ -1,5 +1,5 @@
 <!--
-   Copyright 2016 Google Inc.
+   Copyright 2016 Google LLC
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    tools:context="com.google.ar.core.examples.java.helloar.ComputerVisionActivity">
+    tools:context="com.google.ar.core.examples.java.computervision.ComputerVisionActivity">
 
   <android.opengl.GLSurfaceView
       android:id="@+id/surfaceview"
@@ -25,7 +25,8 @@
       android:layout_height="fill_parent"
       android:layout_gravity="top"/>
 
-  <RadioGroup android:id="@+id/radio_camera_configs"
+  <RadioGroup
+      android:id="@+id/radio_camera_configs"
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"
       android:checkedButton="@+id/radio_low_res"
@@ -37,6 +38,12 @@
           android:onClick="onLowResolutionRadioButtonClicked"
           android:text="@string/label_low_res"/>
       <RadioButton
+          android:id="@+id/radio_medium_res"
+          android:layout_width="wrap_content"
+          android:layout_height="wrap_content"
+          android:onClick="onMediumResolutionRadioButtonClicked"
+          android:text="@string/label_medium_res"/>
+      <RadioButton
           android:id="@+id/radio_high_res"
           android:layout_width="wrap_content"
           android:layout_height="wrap_content"
@@ -45,22 +52,31 @@
   </RadioGroup>
 
   <Switch
-    android:id="@+id/switch_focus_mode"
-    android:layout_width="wrap_content"
-    android:layout_height="wrap_content"
-    android:layout_alignParentRight="true"
-    android:layout_alignParentTop="true"
-    android:checked="false"
-    android:text="@string/switch_focus_mode"
-    android:textColor="#ffffff" />
+      android:id="@+id/switch_cv_mode"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_alignParentTop="true"
+      android:layout_alignParentEnd="true"
+      android:checked="false"
+      android:text="@string/switch_cv_mode"
+      android:textColor="#ffffff" />
+  <Switch
+      android:id="@+id/switch_focus_mode"
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_alignParentEnd="true"
+      android:layout_below="@+id/switch_cv_mode"
+      android:checked="false"
+      android:text="@string/switch_focus_mode"
+      android:textColor="#ffffff" />
 
   <TextView
       android:id="@+id/camera_intrinsics_view"
       android:layout_width="wrap_content"
       android:layout_height="wrap_content"
-      android:padding="20px"
+      android:layout_alignParentStart="true"
       android:layout_alignParentBottom="true"
-      android:layout_alignParentLeft="true"
+      android:padding="20dp"
       android:textColor="#ffffff"/>
 
 </RelativeLayout>

@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,12 +22,12 @@ import android.net.Uri;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
-import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.util.Pair;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
 import com.bumptech.glide.Glide;
 import com.bumptech.glide.RequestManager;
 import com.google.ar.core.Anchor;
@@ -38,12 +38,12 @@ import com.google.ar.core.Camera;
 import com.google.ar.core.Config;
 import com.google.ar.core.Frame;
 import com.google.ar.core.Session;
-import com.google.ar.core.TrackingState;
 import com.google.ar.core.examples.java.augmentedimage.rendering.AugmentedImageRenderer;
 import com.google.ar.core.examples.java.common.helpers.CameraPermissionHelper;
 import com.google.ar.core.examples.java.common.helpers.DisplayRotationHelper;
 import com.google.ar.core.examples.java.common.helpers.FullScreenHelper;
 import com.google.ar.core.examples.java.common.helpers.SnackbarHelper;
+import com.google.ar.core.examples.java.common.helpers.TrackingStateHelper;
 import com.google.ar.core.examples.java.common.rendering.BackgroundRenderer;
 import com.google.ar.core.exceptions.CameraNotAvailableException;
 import com.google.ar.core.exceptions.UnavailableApkTooOldException;
@@ -58,7 +58,16 @@ import java.util.Map;
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
-/** This app extends the HelloAR Java app to include image tracking functionality. */
+/**
+ * This app extends the HelloAR Java app to include image tracking functionality.
+ *
+ * <p>In this example, we assume all images are static or moving slowly with a large occupation of
+ * the screen. If the target is actively moving, we recommend to check
+ * AugmentedImage.getTrackingMethod() and render only when the tracking method equals to
+ * FULL_TRACKING. See details in <a
+ * href="https://developers.google.com/ar/develop/java/augmented-images/">Recognize and Augment
+ * Images</a>.
+ */
 public class AugmentedImageActivity extends AppCompatActivity implements GLSurfaceView.Renderer {
   private static final String TAG = AugmentedImageActivity.class.getSimpleName();
 
@@ -72,6 +81,7 @@ public class AugmentedImageActivity extends AppCompatActivity implements GLSurfa
   private Session session;
   private final SnackbarHelper messageSnackbarHelper = new SnackbarHelper();
   private DisplayRotationHelper displayRotationHelper;
+  private final TrackingStateHelper trackingStateHelper = new TrackingStateHelper(this);
 
   private final BackgroundRenderer backgroundRenderer = new BackgroundRenderer();
   private final AugmentedImageRenderer augmentedImageRenderer = new AugmentedImageRenderer();
@@ -99,6 +109,7 @@ public class AugmentedImageActivity extends AppCompatActivity implements GLSurfa
     surfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0); // Alpha used for plane blending.
     surfaceView.setRenderer(this);
     surfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+    surfaceView.setWillNotDraw(false);
 
     fitToScanView = findViewById(R.id.image_view_fit_to_scan);
     glideRequestManager = Glide.with(this);
@@ -107,6 +118,20 @@ public class AugmentedImageActivity extends AppCompatActivity implements GLSurfa
         .into(fitToScanView);
 
     installRequested = false;
+  }
+
+  @Override
+  protected void onDestroy() {
+    if (session != null) {
+      // Explicitly close ARCore Session to release native resources.
+      // Review the API reference for important considerations before calling close() in apps with
+      // more complicated lifecycle requirements:
+      // https://developers.google.com/ar/reference/java/arcore/reference/com/google/ar/core/Session#close()
+      session.close();
+      session = null;
+    }
+
+    super.onDestroy();
   }
 
   @Override
@@ -166,10 +191,7 @@ public class AugmentedImageActivity extends AppCompatActivity implements GLSurfa
     try {
       session.resume();
     } catch (CameraNotAvailableException e) {
-      // In some cases (such as another camera app launching) the camera may be given to
-      // a different app instead. Handle this properly by showing a message and recreate the
-      // session at the next iteration.
-      messageSnackbarHelper.showError(this, "Camera not available. Please restart the app.");
+      messageSnackbarHelper.showError(this, "Camera not available. Try restarting the app.");
       session = null;
       return;
     }
@@ -194,6 +216,7 @@ public class AugmentedImageActivity extends AppCompatActivity implements GLSurfa
 
   @Override
   public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+    super.onRequestPermissionsResult(requestCode, permissions, results);
     if (!CameraPermissionHelper.hasCameraPermission(this)) {
       Toast.makeText(
               this, "Camera permissions are needed to run this application", Toast.LENGTH_LONG)
@@ -253,13 +276,11 @@ public class AugmentedImageActivity extends AppCompatActivity implements GLSurfa
       Frame frame = session.update();
       Camera camera = frame.getCamera();
 
-      // Draw background.
-      backgroundRenderer.draw(frame);
+      // Keep the screen unlocked while tracking, but allow it to lock when tracking stops.
+      trackingStateHelper.updateKeepScreenOnFlag(camera.getTrackingState());
 
-      // If not tracking, don't draw 3d objects.
-      if (camera.getTrackingState() == TrackingState.PAUSED) {
-        return;
-      }
+      // If frame is ready, render camera preview image to the GL surface.
+      backgroundRenderer.draw(frame);
 
       // Get projection matrix.
       float[] projmtx = new float[16];
@@ -283,6 +304,7 @@ public class AugmentedImageActivity extends AppCompatActivity implements GLSurfa
 
   private void configureSession() {
     Config config = new Config(session);
+    config.setFocusMode(Config.FocusMode.AUTO);
     if (!setupAugmentedImageDatabase(config)) {
       messageSnackbarHelper.showError(this, "Could not setup augmented image database");
     }

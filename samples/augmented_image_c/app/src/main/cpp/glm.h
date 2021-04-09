@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 #define C_ARCORE_AUGMENTED_IMAGE_GLM_H_
 
 #define GLM_FORCE_RADIANS 1
+#define GLM_ENABLE_EXPERIMENTAL
 #include "glm.hpp"
 #include "gtc/matrix_transform.hpp"
 #include "gtc/type_ptr.hpp"

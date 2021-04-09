@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Google Inc. All Rights Reserved.
+ * Copyright 2017 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,48 +17,63 @@
 // This modules handles drawing the passthrough camera image into the OpenGL
 // scene.
 
-#include <type_traits>
-
 #include "background_renderer.h"
+
+#include <type_traits>
 
 namespace hello_ar {
 namespace {
-// Positions of the quad vertices in clip space (X, Y, Z).
+// Positions of the quad vertices in clip space (X, Y).
 const GLfloat kVertices[] = {
-    -1.0f, -1.0f, 0.0f, +1.0f, -1.0f, 0.0f,
-    -1.0f, +1.0f, 0.0f, +1.0f, +1.0f, 0.0f,
+    -1.0f, -1.0f, +1.0f, -1.0f, -1.0f, +1.0f, +1.0f, +1.0f,
 };
 
-// UVs of the quad vertices (S, T)
-const GLfloat kUvs[] = {
-    0.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 0.0f,
-};
+constexpr char kCameraVertexShaderFilename[] = "shaders/screenquad.vert";
+constexpr char kCameraFragmentShaderFilename[] = "shaders/screenquad.frag";
 
-constexpr char kVertexShaderFilename[] = "shaders/screenquad.vert";
-constexpr char kFragmentShaderFilename[] = "shaders/screenquad.frag";
+constexpr char kDepthVisualizerVertexShaderFilename[] =
+    "shaders/background_show_depth_color_visualization.vert";
+constexpr char kDepthVisualizerFragmentShaderFilename[] =
+    "shaders/background_show_depth_color_visualization.frag";
+
 }  // namespace
 
-void BackgroundRenderer::InitializeGlContent(AAssetManager* asset_manager) {
-  shader_program_ = util::CreateProgram(kVertexShaderFilename,
-                                        kFragmentShaderFilename, asset_manager);
-  if (!shader_program_) {
-    LOGE("Could not create program.");
-  }
-
-  glGenTextures(1, &texture_id_);
-  glBindTexture(GL_TEXTURE_EXTERNAL_OES, texture_id_);
+void BackgroundRenderer::InitializeGlContent(AAssetManager* asset_manager,
+                                             int depth_texture_id) {
+  glGenTextures(1, &camera_texture_id_);
+  glBindTexture(GL_TEXTURE_EXTERNAL_OES, camera_texture_id_);
   glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-  uniform_texture_ = glGetUniformLocation(shader_program_, "sTexture");
-  attribute_vertices_ = glGetAttribLocation(shader_program_, "a_Position");
-  attribute_uvs_ = glGetAttribLocation(shader_program_, "a_TexCoord");
+  camera_program_ =
+      util::CreateProgram(kCameraVertexShaderFilename,
+                          kCameraFragmentShaderFilename, asset_manager);
+  if (!camera_program_) {
+    LOGE("Could not create program.");
+  }
+
+  camera_texture_uniform_ = glGetUniformLocation(camera_program_, "sTexture");
+  camera_position_attrib_ = glGetAttribLocation(camera_program_, "a_Position");
+  camera_tex_coord_attrib_ = glGetAttribLocation(camera_program_, "a_TexCoord");
+
+  depth_program_ = util::CreateProgram(kDepthVisualizerVertexShaderFilename,
+                                       kDepthVisualizerFragmentShaderFilename,
+                                       asset_manager);
+  if (!depth_program_) {
+    LOGE("Could not create program.");
+  }
+
+  depth_texture_uniform_ =
+      glGetUniformLocation(depth_program_, "u_DepthTexture");
+  depth_position_attrib_ = glGetAttribLocation(depth_program_, "a_Position");
+  depth_tex_coord_attrib_ = glGetAttribLocation(depth_program_, "a_TexCoord");
+
+  depth_texture_id_ = depth_texture_id;
 }
 
-void BackgroundRenderer::Draw(const ArSession* session, const ArFrame* frame) {
-  static_assert(std::extent<decltype(kUvs)>::value == kNumVertices * 2,
-                "Incorrect kUvs length");
-  static_assert(std::extent<decltype(kVertices)>::value == kNumVertices * 3,
+void BackgroundRenderer::Draw(const ArSession* session, const ArFrame* frame,
+                              bool debug_show_depth_map) {
+  static_assert(std::extent<decltype(kVertices)>::value == kNumVertices * 2,
                 "Incorrect kVertices length");
 
   // If display rotation changed (also includes view size change), we need to
@@ -66,33 +81,72 @@ void BackgroundRenderer::Draw(const ArSession* session, const ArFrame* frame) {
   int32_t geometry_changed = 0;
   ArFrame_getDisplayGeometryChanged(session, frame, &geometry_changed);
   if (geometry_changed != 0 || !uvs_initialized_) {
-    ArFrame_transformDisplayUvCoords(session, frame, kNumVertices * 2, kUvs,
-                                     transformed_uvs_);
+    ArFrame_transformCoordinates2d(
+        session, frame, AR_COORDINATES_2D_OPENGL_NORMALIZED_DEVICE_COORDINATES,
+        kNumVertices, kVertices, AR_COORDINATES_2D_TEXTURE_NORMALIZED,
+        transformed_uvs_);
     uvs_initialized_ = true;
   }
 
-  glUseProgram(shader_program_);
+  int64_t frame_timestamp;
+  ArFrame_getTimestamp(session, frame, &frame_timestamp);
+  if (frame_timestamp == 0) {
+    // Suppress rendering if the camera did not produce the first frame yet.
+    // This is to avoid drawing possible leftover data from previous sessions if
+    // the texture is reused.
+    return;
+  }
+
+  if (depth_texture_id_ == -1 || camera_texture_id_ == -1) {
+    return;
+  }
+
   glDepthMask(GL_FALSE);
 
-  glUniform1i(uniform_texture_, 1);
-  glActiveTexture(GL_TEXTURE1);
-  glBindTexture(GL_TEXTURE_EXTERNAL_OES, texture_id_);
+  if (debug_show_depth_map) {
+    glActiveTexture(GL_TEXTURE1);
+    glBindTexture(GL_TEXTURE_2D, depth_texture_id_);
+    glUseProgram(depth_program_);
+    glUniform1i(depth_texture_uniform_, 0);
+    glUniform1i(camera_texture_uniform_, 1);
 
-  glEnableVertexAttribArray(attribute_vertices_);
-  glVertexAttribPointer(attribute_vertices_, 3, GL_FLOAT, GL_FALSE, 0,
-                        kVertices);
+    // Set the vertex positions and texture coordinates.
+    glVertexAttribPointer(depth_position_attrib_, 2, GL_FLOAT, false, 0,
+                          kVertices);
+    glVertexAttribPointer(depth_tex_coord_attrib_, 2, GL_FLOAT, false, 0,
+                          transformed_uvs_);
+    glEnableVertexAttribArray(depth_position_attrib_);
+    glEnableVertexAttribArray(depth_tex_coord_attrib_);
+  } else {
+    glBindTexture(GL_TEXTURE_EXTERNAL_OES, camera_texture_id_);
+    glUseProgram(camera_program_);
+    glUniform1i(camera_texture_uniform_, 0);
 
-  glEnableVertexAttribArray(attribute_uvs_);
-  glVertexAttribPointer(attribute_uvs_, 2, GL_FLOAT, GL_FALSE, 0,
-                        transformed_uvs_);
+    // Set the vertex positions and texture coordinates.
+    glVertexAttribPointer(camera_position_attrib_, 2, GL_FLOAT, false, 0,
+                          kVertices);
+    glVertexAttribPointer(camera_tex_coord_attrib_, 2, GL_FLOAT, false, 0,
+                          transformed_uvs_);
+    glEnableVertexAttribArray(camera_position_attrib_);
+    glEnableVertexAttribArray(camera_tex_coord_attrib_);
+  }
 
   glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+  // Disable vertex arrays
+  if (debug_show_depth_map) {
+    glDisableVertexAttribArray(depth_position_attrib_);
+    glDisableVertexAttribArray(depth_tex_coord_attrib_);
+  } else {
+    glDisableVertexAttribArray(camera_position_attrib_);
+    glDisableVertexAttribArray(camera_tex_coord_attrib_);
+  }
 
   glUseProgram(0);
   glDepthMask(GL_TRUE);
   util::CheckGlError("BackgroundRenderer::Draw() error");
 }
 
-GLuint BackgroundRenderer::GetTextureId() const { return texture_id_; }
+GLuint BackgroundRenderer::GetTextureId() const { return camera_texture_id_; }
 
 }  // namespace hello_ar

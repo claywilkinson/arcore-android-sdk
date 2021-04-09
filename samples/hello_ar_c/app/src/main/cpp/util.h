@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Google Inc. All Rights Reserved.
+ * Copyright 2017 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,8 +23,10 @@
 #include <android/log.h>
 #include <errno.h>
 #include <jni.h>
+
 #include <cstdint>
 #include <cstdlib>
+#include <map>
 #include <vector>
 
 #include "arcore_c_api.h"
@@ -47,6 +49,15 @@
     abort();                                                               \
   }
 #endif  // CHECK
+
+#ifndef CHECKANDTHROW
+#define CHECKANDTHROW(condition, env, msg, ...)                            \
+  if (!(condition)) {                                                      \
+    LOGE("*** CHECK FAILED at %s:%d: %s", __FILE__, __LINE__, #condition); \
+    util::ThrowJavaException(env, msg);                                    \
+    return ##__VA_ARGS__;                                                  \
+  }
+#endif  // CHECKANDTHROW
 
 namespace hello_ar {
 
@@ -75,6 +86,12 @@ class ScopedArPose {
 // @param operation, the name of the GL function call.
 void CheckGlError(const char* operation);
 
+// Throw a Java exception.
+//
+// @param env, the JNIEnv.
+// @param msg, the message of this exception.
+void ThrowJavaException(JNIEnv* env, const char* msg);
+
 // Create a shader program ID.
 //
 // @param asset_manager, AAssetManager pointer.
@@ -84,6 +101,19 @@ void CheckGlError(const char* operation);
 GLuint CreateProgram(const char* vertex_shader_file_name,
                      const char* fragment_shader_file_name,
                      AAssetManager* asset_manager);
+
+// Create a shader program ID.
+//
+// @param asset_manager, AAssetManager pointer.
+// @param vertex_shader_file_name, the vertex shader source file.
+// @param fragment_shader_file_name, the fragment shader source file.
+// @param define_values_map The #define values to add to the top of the shader
+// source code.
+// @return a non-zero value if the shader is created successfully, otherwise 0.
+GLuint CreateProgram(const char* vertex_shader_file_name,
+                     const char* fragment_shader_file_name,
+                     AAssetManager* asset_manager,
+                     const std::map<std::string, int>& define_values_map);
 
 // Load a text file from assets folder.
 //

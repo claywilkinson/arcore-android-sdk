@@ -1,5 +1,6 @@
 /*
- * Copyright 2017 Google Inc. All Rights Reserved.
+ * Copyright 2017 Google LLC
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -46,8 +47,8 @@ public class PointCloudRenderer {
   private int numPoints = 0;
 
   // Keep track of the last point cloud rendered to avoid updating the VBO if point cloud
-  // was not changed.
-  private PointCloud lastPointCloud = null;
+  // was not changed.  Do this using the timestamp since we can't compare PointCloud objects.
+  private long lastTimestamp = 0;
 
   public PointCloudRenderer() {}
 
@@ -97,18 +98,17 @@ public class PointCloudRenderer {
    * cloud will be ignored.
    */
   public void update(PointCloud cloud) {
-    if (lastPointCloud == cloud) {
+    if (cloud.getTimestamp() == lastTimestamp) {
       // Redundant call.
       return;
     }
-
     ShaderUtil.checkGLError(TAG, "before update");
 
     GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vbo);
-    lastPointCloud = cloud;
+    lastTimestamp = cloud.getTimestamp();
 
     // If the VBO is not large enough to fit the new point cloud, resize it.
-    numPoints = lastPointCloud.getPoints().remaining() / FLOATS_PER_POINT;
+    numPoints = cloud.getPoints().remaining() / FLOATS_PER_POINT;
     if (numPoints * BYTES_PER_POINT > vboSize) {
       while (numPoints * BYTES_PER_POINT > vboSize) {
         vboSize *= 2;
@@ -116,7 +116,7 @@ public class PointCloudRenderer {
       GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, vboSize, null, GLES20.GL_DYNAMIC_DRAW);
     }
     GLES20.glBufferSubData(
-        GLES20.GL_ARRAY_BUFFER, 0, numPoints * BYTES_PER_POINT, lastPointCloud.getPoints());
+        GLES20.GL_ARRAY_BUFFER, 0, numPoints * BYTES_PER_POINT, cloud.getPoints());
     GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
 
     ShaderUtil.checkGLError(TAG, "after update");

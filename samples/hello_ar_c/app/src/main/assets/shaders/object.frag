@@ -1,5 +1,6 @@
 /*
- * Copyright 2017 Google Inc. All Rights Reserved.
+ * Copyright 2017 Google LLC
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -51,10 +52,8 @@ void main() {
 
     // Apply color to grayscale image only if the alpha of u_ObjColor is
     // greater and equal to 255.0.
-    if (u_ObjColor.a >= 255.0) {
-      float intensity = objectColor.r;
-      objectColor.rgb = u_ObjColor.rgb * intensity / 255.0;
-    }
+    objectColor.rgb *= mix(vec3(1.0), u_ObjColor.rgb / 255.0,
+                           step(255.0, u_ObjColor.a));
 
     // Apply inverse SRGB gamma to the texture before making lighting calculations.
     objectColor.rgb = pow(objectColor.rgb, vec3(kInverseGamma));

@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -38,8 +38,7 @@ namespace augmented_image {
 class AugmentedImageApplication {
  public:
   // Constructor and deconstructor.
-  AugmentedImageApplication() = default;
-  AugmentedImageApplication(AAssetManager* asset_manager);
+  explicit AugmentedImageApplication(AAssetManager* asset_manager);
   ~AugmentedImageApplication();
 
   // OnPause is called on the UI thread from the Activity's onPause method.

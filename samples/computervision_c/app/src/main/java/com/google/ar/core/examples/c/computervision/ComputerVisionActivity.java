@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import android.hardware.display.DisplayManager;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
-import android.support.v7.app.AppCompatActivity;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.Surface;
 import android.view.View;
@@ -33,6 +33,7 @@ import android.widget.RadioGroup;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
@@ -58,6 +59,7 @@ public class ComputerVisionActivity extends AppCompatActivity
   private TextView cameraIntrinsicsTextView;
 
   private Switch focusModeSwitch;
+  private GestureDetector gestureDetector;
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -68,17 +70,25 @@ public class ComputerVisionActivity extends AppCompatActivity
     focusModeSwitch.setOnCheckedChangeListener(this::onFocusModeChanged);
 
     surfaceView = findViewById(R.id.surfaceview);
-    surfaceView.setOnTouchListener(
-        (View view, MotionEvent motionEvent) -> {
-          if (motionEvent.getAction() == MotionEvent.ACTION_UP) {
-            splitterPosition = (splitterPosition < 0.5f) ? 1.0f : 0.0f;
+    gestureDetector =
+        new GestureDetector(
+            this,
+            new GestureDetector.SimpleOnGestureListener() {
+              @Override
+              public boolean onSingleTapUp(MotionEvent e) {
+                splitterPosition = (splitterPosition < 0.5f) ? 1.0f : 0.0f;
 
-            // Turn off the CPU resolution radio buttons if CPU image is not displayed.
-            showCameraConfigMenu(splitterPosition < 0.5f);
-          }
+                // Turn off the CPU resolution radio buttons if CPU image is not displayed.
+                showCameraConfigMenu(splitterPosition < 0.5f);
+                return true;
+              }
 
-          return true;
-        });
+              @Override
+              public boolean onDown(MotionEvent e) {
+                return true;
+              }
+            });
+    surfaceView.setOnTouchListener((unusedView, event) -> gestureDetector.onTouchEvent(event));
 
     // Set up renderer.
     surfaceView.setPreserveEGLContextOnPause(true);
@@ -86,6 +96,7 @@ public class ComputerVisionActivity extends AppCompatActivity
     surfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0); // Alpha used for plane blending.
     surfaceView.setRenderer(this);
     surfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+    surfaceView.setWillNotDraw(false);
 
     nativeApplication = JniInterface.createNativeApplication(getAssets());
   }
@@ -256,6 +267,7 @@ public class ComputerVisionActivity extends AppCompatActivity
 
   @Override
   public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+    super.onRequestPermissionsResult(requestCode, permissions, results);
     if (!CameraPermissionHelper.hasCameraPermission(this)) {
       Toast.makeText(this, "Camera permission is needed to run this application", Toast.LENGTH_LONG)
           .show();

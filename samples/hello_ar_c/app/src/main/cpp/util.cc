@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Google Inc. All Rights Reserved.
+ * Copyright 2017 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,12 @@ void CheckGlError(const char* operation) {
   if (anyError) {
     abort();
   }
+}
+
+void ThrowJavaException(JNIEnv* env, const char* msg) {
+  LOGE("Throw Java exception: %s", msg);
+  jclass c = env->FindClass("java/lang/RuntimeException");
+  env->ThrowNew(c, msg);
 }
 
 // Convenience function used in CreateProgram below.
@@ -74,28 +80,45 @@ static GLuint LoadShader(GLenum shader_type, const char* shader_source) {
 GLuint CreateProgram(const char* vertex_shader_file_name,
                      const char* fragment_shader_file_name,
                      AAssetManager* asset_manager) {
-  std::string VertexShaderContent;
+  std::map<std::string, int> empty_define;
+  return CreateProgram(vertex_shader_file_name, fragment_shader_file_name,
+                       asset_manager, empty_define);
+}
+GLuint CreateProgram(const char* vertex_shader_file_name,
+                     const char* fragment_shader_file_name,
+                     AAssetManager* asset_manager,
+                     const std::map<std::string, int>& define_values_map) {
+  std::string vertexShaderContent;
   if (!LoadTextFileFromAssetManager(vertex_shader_file_name, asset_manager,
-                                    &VertexShaderContent)) {
+                                    &vertexShaderContent)) {
     LOGE("Failed to load file: %s", vertex_shader_file_name);
     return 0;
   }
 
-  std::string FragmentShaderContent;
+  std::string fragmentShaderContent;
   if (!LoadTextFileFromAssetManager(fragment_shader_file_name, asset_manager,
-                                    &FragmentShaderContent)) {
+                                    &fragmentShaderContent)) {
     LOGE("Failed to load file: %s", fragment_shader_file_name);
     return 0;
   }
 
+  // Prepend any #define values specified during this run.
+  std::stringstream defines;
+  for (const auto& entry : define_values_map) {
+    defines << "#define " << entry.first << " " << entry.second << "\n";
+  }
+  fragmentShaderContent = defines.str() + fragmentShaderContent;
+  vertexShaderContent = defines.str() + vertexShaderContent;
+
+  // Compiles shader code.
   GLuint vertexShader =
-      LoadShader(GL_VERTEX_SHADER, VertexShaderContent.c_str());
+      LoadShader(GL_VERTEX_SHADER, vertexShaderContent.c_str());
   if (!vertexShader) {
     return 0;
   }
 
   GLuint fragment_shader =
-      LoadShader(GL_FRAGMENT_SHADER, FragmentShaderContent.c_str());
+      LoadShader(GL_FRAGMENT_SHADER, fragmentShaderContent.c_str());
   if (!fragment_shader) {
     return 0;
   }
@@ -157,7 +180,7 @@ bool LoadTextFileFromAssetManager(const char* file_name,
 bool LoadPngFromAssetManager(int target, const std::string& path) {
   JNIEnv* env = GetJniEnv();
 
-  // Put all the JNI values in a structure that is statically initalized on the
+  // Put all the JNI values in a structure that is statically initialized on the
   // first call to this method.  This makes it thread safe in the unlikely case
   // of multiple threads calling this method.
   static struct JNIData {
@@ -259,7 +282,7 @@ bool LoadObjFile(const std::string& file_name, AAssetManager* asset_manager,
       int matches = sscanf(line_header, "v %f %f %f\n", &vertex[0], &vertex[1],
                            &vertex[2]);
       if (matches != 3) {
-        LOGE("Format of 'v float float float' required for each vertice line");
+        LOGE("Format of 'v float float float' required for each vertex line");
         return false;
       }
 

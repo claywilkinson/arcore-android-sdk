@@ -1,5 +1,6 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -18,7 +19,8 @@ import android.content.Context;
 import com.google.ar.core.Anchor;
 import com.google.ar.core.AugmentedImage;
 import com.google.ar.core.Pose;
-import com.google.ar.core.examples.java.augmentedimage.rendering.ObjectRenderer.BlendMode;
+import com.google.ar.core.examples.java.common.rendering.ObjectRenderer;
+import com.google.ar.core.examples.java.common.rendering.ObjectRenderer.BlendMode;
 import java.io.IOException;
 
 /** Renders an augmented image. */
@@ -44,22 +46,22 @@ public class AugmentedImageRenderer {
     imageFrameUpperLeft.createOnGlThread(
         context, "models/frame_upper_left.obj", "models/frame_base.png");
     imageFrameUpperLeft.setMaterialProperties(0.0f, 3.5f, 1.0f, 6.0f);
-    imageFrameUpperLeft.setBlendMode(BlendMode.SourceAlpha);
+    imageFrameUpperLeft.setBlendMode(BlendMode.AlphaBlending);
 
     imageFrameUpperRight.createOnGlThread(
         context, "models/frame_upper_right.obj", "models/frame_base.png");
     imageFrameUpperRight.setMaterialProperties(0.0f, 3.5f, 1.0f, 6.0f);
-    imageFrameUpperRight.setBlendMode(BlendMode.SourceAlpha);
+    imageFrameUpperRight.setBlendMode(BlendMode.AlphaBlending);
 
     imageFrameLowerLeft.createOnGlThread(
         context, "models/frame_lower_left.obj", "models/frame_base.png");
     imageFrameLowerLeft.setMaterialProperties(0.0f, 3.5f, 1.0f, 6.0f);
-    imageFrameLowerLeft.setBlendMode(BlendMode.SourceAlpha);
+    imageFrameLowerLeft.setBlendMode(BlendMode.AlphaBlending);
 
     imageFrameLowerRight.createOnGlThread(
         context, "models/frame_lower_right.obj", "models/frame_base.png");
     imageFrameLowerRight.setMaterialProperties(0.0f, 3.5f, 1.0f, 6.0f);
-    imageFrameLowerRight.setBlendMode(BlendMode.SourceAlpha);
+    imageFrameLowerRight.setBlendMode(BlendMode.AlphaBlending);
   }
 
   public void draw(

@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 
 #include "computer_vision_application.h"
-#include <media/NdkImage.h>
 #include <array>
 #include <cmath>
 #include <iomanip>
@@ -161,21 +160,22 @@ void ComputerVisionApplication::OnDrawFrame(float split_position) {
     LOGE("ComputerVisionApplication::OnDrawFrame ArSession_update error");
   }
 
-  ArImage* ar_image;
-  const AImage* ndk_image = nullptr;
-  ArStatus status =
-      ArFrame_acquireCameraImage(ar_session_, ar_frame_, &ar_image);
-  if (status == AR_SUCCESS) {
-    ArImage_getNdkImage(ar_image, &ndk_image);
-    ArImage_release(ar_image);
-  } else {
+  // Lock the image use to avoid pausing & resuming session when the image is in
+  // use. This is because switching resolutions requires all images to be
+  // released before session.resume() is called.
+  std::lock_guard<std::mutex> lock(frame_image_in_use_mutex_);
+
+  ArImage* image = nullptr;
+  ArStatus status = ArFrame_acquireCameraImage(ar_session_, ar_frame_, &image);
+  if (status != AR_SUCCESS) {
     LOGW(
         "ComputerVisionApplication::OnDrawFrame acquire camera image not "
         "ready.");
   }
 
-  cpu_image_renderer_.Draw(ar_session_, ar_frame_, ndk_image, aspect_ratio_,
+  cpu_image_renderer_.Draw(ar_session_, ar_frame_, image, aspect_ratio_,
                            camera_to_display_rotation_, split_position);
+  ArImage_release(image);
 }
 
 std::string ComputerVisionApplication::getCameraConfigLabel(
@@ -196,6 +196,9 @@ ArStatus ComputerVisionApplication::setCameraConfig(bool is_low_resolution) {
   // To change the AR camera config - first we pause the AR session, set the
   // desired camera config and then resume the AR session.
   CHECK(ar_session_)
+
+  // Block here if the image is still being used.
+  std::lock_guard<std::mutex> lock(frame_image_in_use_mutex_);
 
   ArSession_pause(ar_session_);
 
@@ -246,7 +249,14 @@ void ComputerVisionApplication::obtainCameraConfigs() {
   ArCameraConfigList* all_camera_configs = nullptr;
   int32_t num_configs = 0;
   ArCameraConfigList_create(ar_session_, &all_camera_configs);
-  ArSession_getSupportedCameraConfigs(ar_session_, all_camera_configs);
+  // Create filter first to get both 30 and 60 fps.
+  ArCameraConfigFilter* camera_config_filter = nullptr;
+  ArCameraConfigFilter_create(ar_session_, &camera_config_filter);
+  ArCameraConfigFilter_setTargetFps(
+      ar_session_, camera_config_filter,
+      AR_CAMERA_CONFIG_TARGET_FPS_30 | AR_CAMERA_CONFIG_TARGET_FPS_60);
+  ArSession_getSupportedCameraConfigsWithFilter(
+      ar_session_, camera_config_filter, all_camera_configs);
   ArCameraConfigList_getSize(ar_session_, all_camera_configs, &num_configs);
 
   if (num_configs < 1) {

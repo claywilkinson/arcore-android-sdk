@@ -1,5 +1,5 @@
 <!--
-   Copyright 2018 Google Inc.
+   Copyright 2019 Google LLC
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -58,7 +58,6 @@
           android:paddingVertical="5dp"
           android:fontFamily="monospace"
           android:text="@string/initial_room_code"
-          android:textAlignment="center"
           android:textSize="20sp"
           android:gravity="center_vertical"
           android:background="#001337"/>

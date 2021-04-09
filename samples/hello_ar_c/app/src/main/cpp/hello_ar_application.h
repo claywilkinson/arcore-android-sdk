@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Google Inc. All Rights Reserved.
+ * Copyright 2017 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 #include <GLES2/gl2ext.h>
 #include <android/asset_manager.h>
 #include <jni.h>
+
 #include <memory>
 #include <set>
 #include <string>
@@ -32,6 +33,7 @@
 #include "obj_renderer.h"
 #include "plane_renderer.h"
 #include "point_cloud_renderer.h"
+#include "texture.h"
 #include "util.h"
 
 namespace hello_ar {
@@ -40,15 +42,14 @@ namespace hello_ar {
 class HelloArApplication {
  public:
   // Constructor and deconstructor.
-  HelloArApplication() = default;
-  HelloArApplication(AAssetManager* asset_manager);
+  explicit HelloArApplication(AAssetManager* asset_manager);
   ~HelloArApplication();
 
   // OnPause is called on the UI thread from the Activity's onPause method.
   void OnPause();
 
   // OnResume is called on the UI thread from the Activity's onResume method.
-  void OnResume(void* env, void* context, void* activity);
+  void OnResume(JNIEnv* env, void* context, void* activity);
 
   // OnSurfaceCreated is called on the OpenGL thread when GLSurfaceView
   // is created.
@@ -63,7 +64,8 @@ class HelloArApplication {
   void OnDisplayGeometryChanged(int display_rotation, int width, int height);
 
   // OnDrawFrame is called on the OpenGL thread to render the next frame.
-  void OnDrawFrame();
+  void OnDrawFrame(bool depthColorVisualizationEnabled,
+                   bool useDepthForOcclusion);
 
   // OnTouched is called on the OpenGL thread after the user touches the screen.
   // @param x: x position on the screen (pixels).
@@ -74,40 +76,46 @@ class HelloArApplication {
   // "searching for planes" snackbar.
   bool HasDetectedPlanes() const { return plane_count_ > 0; }
 
+  // Returns true if depth is supported.
+  bool IsDepthSupported();
+
+  void OnSettingsChange(bool is_instant_placement_enabled);
+
  private:
+  glm::mat3 GetTextureTransformMatrix(const ArSession* session,
+                                      const ArFrame* frame);
   ArSession* ar_session_ = nullptr;
   ArFrame* ar_frame_ = nullptr;
 
   bool install_requested_ = false;
+  bool calculate_uv_transform_ = false;
   int width_ = 1;
   int height_ = 1;
   int display_rotation_ = 0;
+  bool is_instant_placement_enabled_ = true;
 
   AAssetManager* const asset_manager_;
 
   // The anchors at which we are drawing android models using given colors.
   struct ColoredAnchor {
     ArAnchor* anchor;
+    ArTrackable* trackable;
     float color[4];
   };
 
   std::vector<ColoredAnchor> anchors_;
 
-  // Stores the randomly-selected color each plane is drawn with
-  std::unordered_map<ArPlane*, glm::vec3> plane_color_map_;
-
-  // The first plane is always rendered in white, if this is true then a plane
-  // at some point has been found.
-  bool first_plane_has_been_found_ = false;
-
   PointCloudRenderer point_cloud_renderer_;
   BackgroundRenderer background_renderer_;
   PlaneRenderer plane_renderer_;
   ObjRenderer andy_renderer_;
+  Texture depth_texture_;
 
   int32_t plane_count_ = 0;
 
-  void SetColor(float r, float g, float b, float a, float* color4f);
+  void ConfigureSession();
+
+  void UpdateAnchorColor(ColoredAnchor* colored_anchor);
 };
 }  // namespace hello_ar
 

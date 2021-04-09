@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@
 #include <android/asset_manager.h>
 #include <jni.h>
 #include <memory>
+#include <mutex>  // NOLINT
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -37,7 +38,7 @@ namespace computer_vision {
 class ComputerVisionApplication {
  public:
   // Constructor and deconstructor.
-  ComputerVisionApplication(AAssetManager* asset_manager);
+  explicit ComputerVisionApplication(AAssetManager* asset_manager);
   ~ComputerVisionApplication();
 
   // OnPause is called on the UI thread from the Activity's onPause method.
@@ -99,6 +100,10 @@ class ComputerVisionApplication {
     std::string config_label;
     ArCameraConfig* config = nullptr;
   };
+
+  // This lock prevents changing resolution as the frame is being rendered.
+  // ARCore requires all cpu images to be released before changing resolution.
+  std::mutex frame_image_in_use_mutex_;
 
   std::vector<CameraConfig> camera_configs_;
   CameraConfig* cpu_low_resolution_camera_config_ptr_ = nullptr;

@@ -1,5 +1,6 @@
 /*
- * Copyright 2017 Google Inc. All Rights Reserved.
+ * Copyright 2017 Google LLC
+ *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
@@ -83,8 +84,6 @@ public class PlaneRenderer {
   private int planeNormalUniform;
   private int planeModelViewProjectionUniform;
   private int textureUniform;
-  private int lineColorUniform;
-  private int dotColorUniform;
   private int gridControlUniform;
   private int planeUvMatrixUniform;
 
@@ -101,7 +100,6 @@ public class PlaneRenderer {
   private final float[] modelMatrix = new float[16];
   private final float[] modelViewMatrix = new float[16];
   private final float[] modelViewProjectionMatrix = new float[16];
-  private final float[] planeColor = new float[4];
   private final float[] planeAngleUvMatrix =
       new float[4]; // 2x2 rotation matrix applied to uv coords.
 
@@ -154,8 +152,6 @@ public class PlaneRenderer {
     planeModelViewProjectionUniform =
         GLES20.glGetUniformLocation(planeProgram, "u_ModelViewProjection");
     textureUniform = GLES20.glGetUniformLocation(planeProgram, "u_Texture");
-    lineColorUniform = GLES20.glGetUniformLocation(planeProgram, "u_lineColor");
-    dotColorUniform = GLES20.glGetUniformLocation(planeProgram, "u_dotColor");
     gridControlUniform = GLES20.glGetUniformLocation(planeProgram, "u_gridControl");
     planeUvMatrixUniform = GLES20.glGetUniformLocation(planeProgram, "u_PlaneUvMatrix");
 
@@ -315,29 +311,19 @@ public class PlaneRenderer {
         new Comparator<SortablePlane>() {
           @Override
           public int compare(SortablePlane a, SortablePlane b) {
-            return Float.compare(a.distance, b.distance);
+            return Float.compare(b.distance, a.distance);
           }
         });
 
     float[] cameraView = new float[16];
     cameraPose.inverse().toMatrix(cameraView, 0);
 
-    // Planes are drawn with additive blending, masked by the alpha channel for occlusion.
-
-    // Start by clearing the alpha channel of the color buffer to 1.0.
-    GLES20.glClearColor(1, 1, 1, 1);
-    GLES20.glColorMask(false, false, false, true);
-    GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-    GLES20.glColorMask(true, true, true, true);
-
     // Disable depth write.
     GLES20.glDepthMask(false);
 
-    // Additive blending, masked by alpha channel, clearing alpha channel.
+    // Normal alpha blending with premultiplied alpha.
     GLES20.glEnable(GLES20.GL_BLEND);
-    GLES20.glBlendFuncSeparate(
-        GLES20.GL_DST_ALPHA, GLES20.GL_ONE, // RGB (src, dest)
-        GLES20.GL_ZERO, GLES20.GL_ONE_MINUS_SRC_ALPHA); // ALPHA (src, dest)
+    GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA);
 
     // Set up the shader.
     GLES20.glUseProgram(planeProgram);
@@ -373,12 +359,6 @@ public class PlaneRenderer {
         planeIndex = planeIndexMap.size();
         planeIndexMap.put(plane, planeIndex);
       }
-
-      // Set plane color. Computed deterministically from the Plane index.
-      int colorIndex = planeIndex % PLANE_COLORS_RGBA.length;
-      colorRgbaToFloat(planeColor, PLANE_COLORS_RGBA[colorIndex]);
-      GLES20.glUniform4fv(lineColorUniform, 1, planeColor, 0);
-      GLES20.glUniform4fv(dotColorUniform, 1, planeColor, 0);
 
       // Each plane will have its own angle offset from others, to make them easier to
       // distinguish. Compute a 2x2 rotation matrix from the angle.
@@ -417,30 +397,4 @@ public class PlaneRenderer {
         + (cameraY - planePose.ty()) * normal[1]
         + (cameraZ - planePose.tz()) * normal[2];
   }
-
-  private static void colorRgbaToFloat(float[] planeColor, int colorRgba) {
-    planeColor[0] = ((float) ((colorRgba >> 24) & 0xff)) / 255.0f;
-    planeColor[1] = ((float) ((colorRgba >> 16) & 0xff)) / 255.0f;
-    planeColor[2] = ((float) ((colorRgba >> 8) & 0xff)) / 255.0f;
-    planeColor[3] = ((float) ((colorRgba >> 0) & 0xff)) / 255.0f;
-  }
-
-  private static final int[] PLANE_COLORS_RGBA = {
-    0xFFFFFFFF,
-    0xF44336FF,
-    0xE91E63FF,
-    0x9C27B0FF,
-    0x673AB7FF,
-    0x3F51B5FF,
-    0x2196F3FF,
-    0x03A9F4FF,
-    0x00BCD4FF,
-    0x009688FF,
-    0x4CAF50FF,
-    0x8BC34AFF,
-    0xCDDC39FF,
-    0xFFEB3BFF,
-    0xFFC107FF,
-    0xFF9800FF,
-  };
 }

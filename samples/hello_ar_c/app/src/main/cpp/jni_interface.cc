@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Google Inc. All Rights Reserved.
+ * Copyright 2017 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -51,6 +51,17 @@ JNI_METHOD(jlong, createNativeApplication)
   return jptr(new hello_ar::HelloArApplication(asset_manager));
 }
 
+JNI_METHOD(jboolean, isDepthSupported)
+(JNIEnv *, jclass, jlong native_application) {
+  return native(native_application)->IsDepthSupported();
+}
+
+JNI_METHOD(void, onSettingsChange)
+(JNIEnv *, jclass, jlong native_application,
+ jboolean is_instant_placement_enabled) {
+  native(native_application)->OnSettingsChange(is_instant_placement_enabled);
+}
+
 JNI_METHOD(void, destroyNativeApplication)
 (JNIEnv *, jclass, jlong native_application) {
   delete native(native_application);
@@ -80,8 +91,10 @@ JNI_METHOD(void, onDisplayGeometryChanged)
 }
 
 JNI_METHOD(void, onGlSurfaceDrawFrame)
-(JNIEnv *, jclass, jlong native_application) {
-  native(native_application)->OnDrawFrame();
+(JNIEnv *, jclass, jlong native_application,
+ jboolean depth_color_visualization_enabled, jboolean use_depth_for_occlusion) {
+  native(native_application)
+      ->OnDrawFrame(depth_color_visualization_enabled, use_depth_for_occlusion);
 }
 
 JNI_METHOD(void, onTouched)

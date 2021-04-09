@@ -1,5 +1,5 @@
 /*
- * Copyright 2017 Google Inc. All Rights Reserved.
+ * Copyright 2017 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,8 +42,7 @@ class PlaneRenderer {
 
   // Draws the provided plane.
   void Draw(const glm::mat4& projection_mat, const glm::mat4& view_mat,
-            const ArSession& ar_session, const ArPlane& ar_plane,
-            const glm::vec3& color);
+            const ArSession& ar_session, const ArPlane& ar_plane);
 
  private:
   void UpdateForPlane(const ArSession& ar_session, const ArPlane& ar_plane);
@@ -61,7 +60,6 @@ class PlaneRenderer {
   GLint uniform_texture_;
   GLint uniform_model_mat_;
   GLint uniform_normal_vec_;
-  GLint uniform_color_;
 };
 }  // namespace hello_ar
 

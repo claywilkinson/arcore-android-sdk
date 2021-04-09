@@ -1,3 +1,18 @@
+/*
+ * Copyright 2019 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package com.google.ar.core.examples.c.helloar;
 
 import android.app.Activity;
@@ -37,13 +52,19 @@ public class JniInterface {
       long nativeApplication, int displayRotation, int width, int height);
 
   /** Main render loop, called on the OpenGL thread. */
-  public static native void onGlSurfaceDrawFrame(long nativeApplication);
+  public static native void onGlSurfaceDrawFrame(
+      long nativeApplication, boolean depthColorVisualizationEnabled, boolean useDepthForOcclusion);
 
   /** OnTouch event, called on the OpenGL thread. */
   public static native void onTouched(long nativeApplication, float x, float y);
 
   /** Get plane count in current session. Used to disable the "searching for surfaces" snackbar. */
   public static native boolean hasDetectedPlanes(long nativeApplication);
+
+  public static native boolean isDepthSupported(long nativeApplication);
+
+  public static native void onSettingsChange(
+      long nativeApplication, boolean isInstantPlacementEnabled);
 
   public static Bitmap loadImage(String imageName) {
 

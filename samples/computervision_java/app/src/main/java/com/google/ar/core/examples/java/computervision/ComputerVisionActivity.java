@@ -1,5 +1,5 @@
 /*
- * Copyright 2018 Google Inc. All Rights Reserved.
+ * Copyright 2018 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,18 +21,21 @@ import android.media.Image;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.os.Bundle;
-import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.util.Size;
+import android.view.Gravity;
 import android.view.View;
 import android.widget.CompoundButton;
 import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
+import androidx.appcompat.app.AppCompatActivity;
 import com.google.ar.core.ArCoreApk;
 import com.google.ar.core.Camera;
 import com.google.ar.core.CameraConfig;
+import com.google.ar.core.CameraConfigFilter;
 import com.google.ar.core.CameraIntrinsics;
 import com.google.ar.core.Config;
 import com.google.ar.core.Frame;
@@ -40,6 +43,7 @@ import com.google.ar.core.Session;
 import com.google.ar.core.examples.java.common.helpers.CameraPermissionHelper;
 import com.google.ar.core.examples.java.common.helpers.FullScreenHelper;
 import com.google.ar.core.examples.java.common.helpers.SnackbarHelper;
+import com.google.ar.core.examples.java.common.helpers.TrackingStateHelper;
 import com.google.ar.core.exceptions.CameraNotAvailableException;
 import com.google.ar.core.exceptions.NotYetAvailableException;
 import com.google.ar.core.exceptions.UnavailableApkTooOldException;
@@ -48,18 +52,23 @@ import com.google.ar.core.exceptions.UnavailableSdkTooOldException;
 import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
 
-/** This is a simple example that demonstrates cpu image access with ARCore. */
+/** This is a simple example that demonstrates CPU image access with ARCore. */
 public class ComputerVisionActivity extends AppCompatActivity implements GLSurfaceView.Renderer {
   private static final String TAG = ComputerVisionActivity.class.getSimpleName();
   private static final String CAMERA_INTRINSICS_TEXT_FORMAT =
-      "Unrotated Camera %s %s Intrinsics:\n\tFocal Length: (%.2f, %.2f)"
+      "\tUnrotated Camera %s %s Intrinsics:\n\tFocal Length: (%.2f, %.2f)"
           + "\n\tPrincipal Point: (%.2f, %.2f)"
           + "\n\t%s Image Dimensions: (%d, %d)"
-          + "\n\tUnrotated Field of View: (%.2fº, %.2fº)";
+          + "\n\tUnrotated Field of View: (%.2f˚, %.2f˚)"
+          + "\n\tRender frame time: %.1f ms (%.0ffps)"
+          + "\n\tCPU image frame time: %.1f ms (%.0ffps)";
   private static final float RADIANS_TO_DEGREES = (float) (180 / Math.PI);
 
   // This app demonstrates two approaches to obtaining image data accessible on CPU:
@@ -70,10 +79,20 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
   private enum ImageAcquisitionPath {
     CPU_DIRECT_ACCESS,
     GPU_DOWNLOAD
-  };
+  }
 
   // Select the image acquisition path here.
   private final ImageAcquisitionPath imageAcquisitionPath = ImageAcquisitionPath.CPU_DIRECT_ACCESS;
+
+  // Multiple CPU image Resolution.
+  private enum ImageResolution {
+    LOW_RESOLUTION,
+    MEDIUM_RESOLUTION,
+    HIGH_RESOLUTION,
+  }
+
+  // Default CPU image is low resolution.
+  private ImageResolution cpuResolution = ImageResolution.LOW_RESOLUTION;
 
   // Session management and rendering.
   private GLSurfaceView surfaceView;
@@ -82,9 +101,13 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
   private boolean installRequested;
   private final SnackbarHelper messageSnackbarHelper = new SnackbarHelper();
   private CpuImageDisplayRotationHelper cpuImageDisplayRotationHelper;
-  private CpuImageTouchListener cpuImageTouchListener;
+  private final TrackingStateHelper trackingStateHelper = new TrackingStateHelper(this);
   private final CpuImageRenderer cpuImageRenderer = new CpuImageRenderer();
   private final EdgeDetector edgeDetector = new EdgeDetector();
+
+  // This lock prevents changing resolution as the frame is being rendered. ARCore requires all
+  // CPU images to be released before changing resolution.
+  private final Object frameImageInUseLock = new Object();
 
   // Camera intrinsics text view.
   private TextView cameraIntrinsicsTextView;
@@ -102,11 +125,16 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
   private static final int IMAGE_HEIGHT = 720;
 
   // For Camera Configuration APIs usage.
-  private boolean isLowResolutionSelected;
   private CameraConfig cpuLowResolutionCameraConfig;
+  private CameraConfig cpuMediumResolutionCameraConfig;
   private CameraConfig cpuHighResolutionCameraConfig;
 
+  private Switch cvModeSwitch;
+  private boolean isCVModeOn = true;
   private Switch focusModeSwitch;
+
+  private final FrameTimeHelper renderFrameTimeHelper = new FrameTimeHelper();
+  private final FrameTimeHelper cpuImageFrameTimeHelper = new FrameTimeHelper();
 
   @Override
   protected void onCreate(Bundle savedInstanceState) {
@@ -115,14 +143,12 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
     surfaceView = findViewById(R.id.surfaceview);
     cameraIntrinsicsTextView = findViewById(R.id.camera_intrinsics_view);
     surfaceView = findViewById(R.id.surfaceview);
+    cvModeSwitch = (Switch) findViewById(R.id.switch_cv_mode);
+    cvModeSwitch.setOnCheckedChangeListener(this::onCVModeChanged);
     focusModeSwitch = (Switch) findViewById(R.id.switch_focus_mode);
     focusModeSwitch.setOnCheckedChangeListener(this::onFocusModeChanged);
 
     cpuImageDisplayRotationHelper = new CpuImageDisplayRotationHelper(/*context=*/ this);
-    cpuImageTouchListener = new CpuImageTouchListener(cpuImageRenderer, /*context=*/ this);
-
-    // Setup a touch listener to control the texture splitter position.
-    surfaceView.setOnTouchListener(cpuImageTouchListener);
 
     // Set up renderer.
     surfaceView.setPreserveEGLContextOnPause(true);
@@ -130,8 +156,26 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
     surfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0); // Alpha used for plane blending.
     surfaceView.setRenderer(this);
     surfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+    surfaceView.setWillNotDraw(false);
+
+    getLifecycle().addObserver(renderFrameTimeHelper);
+    getLifecycle().addObserver(cpuImageFrameTimeHelper);
 
     installRequested = false;
+  }
+
+  @Override
+  protected void onDestroy() {
+    if (session != null) {
+      // Explicitly close ARCore Session to release native resources.
+      // Review the API reference for important considerations before calling close() in apps with
+      // more complicated lifecycle requirements:
+      // https://developers.google.com/ar/reference/java/arcore/reference/com/google/ar/core/Session#close()
+      session.close();
+      session = null;
+    }
+
+    super.onDestroy();
   }
 
   @Override
@@ -183,16 +227,14 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
 
     obtainCameraConfigs();
 
+    cvModeSwitch.setChecked(cpuImageRenderer.getSplitterPosition() < 0.5f);
     focusModeSwitch.setChecked(config.getFocusMode() != Config.FocusMode.FIXED);
 
     // Note that order matters - see the note in onPause(), the reverse applies here.
     try {
       session.resume();
     } catch (CameraNotAvailableException e) {
-      // In some cases (such as another camera app launching) the camera may be given to
-      // a different app instead. Handle this properly by showing a message and recreate the
-      // session at the next iteration.
-      messageSnackbarHelper.showError(this, "Camera not available. Please restart the app.");
+      messageSnackbarHelper.showError(this, "Camera not available. Try restarting the app.");
       session = null;
       return;
     }
@@ -215,6 +257,7 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
 
   @Override
   public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+    super.onRequestPermissionsResult(requestCode, permissions, results);
     if (!CameraPermissionHelper.hasCameraPermission(this)) {
       Toast.makeText(this, "Camera permission is needed to run this application", Toast.LENGTH_LONG)
           .show();
@@ -268,28 +311,38 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
     if (session == null) {
       return;
     }
-    // Notify ARCore session that the view size changed so that the perspective matrix and
-    // the video background can be properly adjusted.
-    cpuImageDisplayRotationHelper.updateSessionIfNeeded(session);
 
-    try {
-      session.setCameraTextureName(cpuImageRenderer.getTextureId());
-      final Frame frame = session.update();
+    // Synchronize here to avoid calling Session.update or Session.acquireCameraImage while paused.
+    synchronized (frameImageInUseLock) {
+      // Notify ARCore session that the view size changed so that the perspective matrix and
+      // the video background can be properly adjusted.
+      cpuImageDisplayRotationHelper.updateSessionIfNeeded(session);
 
-      switch (imageAcquisitionPath) {
-        case CPU_DIRECT_ACCESS:
-          renderProcessedImageCpuDirectAccess(frame);
-          break;
-        case GPU_DOWNLOAD:
-          renderProcessedImageGpuDownload(frame);
-          break;
+      try {
+        session.setCameraTextureName(cpuImageRenderer.getTextureId());
+        final Frame frame = session.update();
+        final Camera camera = frame.getCamera();
+
+        // Keep the screen unlocked while tracking, but allow it to lock when tracking stops.
+        trackingStateHelper.updateKeepScreenOnFlag(camera.getTrackingState());
+
+        renderFrameTimeHelper.nextFrame();
+
+        switch (imageAcquisitionPath) {
+          case CPU_DIRECT_ACCESS:
+            renderProcessedImageCpuDirectAccess(frame);
+            break;
+          case GPU_DOWNLOAD:
+            renderProcessedImageGpuDownload(frame);
+            break;
+        }
+
+        // Update the camera intrinsics' text.
+        runOnUiThread(() -> cameraIntrinsicsTextView.setText(getCameraIntrinsicsText(frame)));
+      } catch (Exception t) {
+        // Avoid crashing the application due to unhandled exceptions.
+        Log.e(TAG, "Exception on the OpenGL thread", t);
       }
-
-      // Update the camera intrinsics' text.
-      runOnUiThread(() -> cameraIntrinsicsTextView.setText(getCameraIntrinsicsText(frame)));
-    } catch (Exception t) {
-      // Avoid crashing the application due to unhandled exceptions.
-      Log.e(TAG, "Exception on the OpenGL thread", t);
     }
   }
 
@@ -301,12 +354,16 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
             "Expected image in YUV_420_888 format, got format " + image.getFormat());
       }
 
-      ByteBuffer processedImageBytesGrayscale =
-          edgeDetector.detect(
-              image.getWidth(),
-              image.getHeight(),
-              image.getPlanes()[0].getRowStride(),
-              image.getPlanes()[0].getBuffer());
+      ByteBuffer processedImageBytesGrayscale = null;
+      // Do not process the image with edge dectection algorithm if it is not being displayed.
+      if (isCVModeOn) {
+        processedImageBytesGrayscale =
+            edgeDetector.detect(
+                image.getWidth(),
+                image.getHeight(),
+                image.getPlanes()[0].getRowStride(),
+                image.getPlanes()[0].getBuffer());
+      }
 
       cpuImageRenderer.drawWithCpuImage(
           frame,
@@ -316,6 +373,8 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
           cpuImageDisplayRotationHelper.getViewportAspectRatio(),
           cpuImageDisplayRotationHelper.getCameraToDisplayRotation());
 
+      // Measure frame time since last successful execution of drawWithCpuImage().
+      cpuImageFrameTimeHelper.nextFrame();
     } catch (NotYetAvailableException e) {
       // This exception will routinely happen during startup, and is expected. cpuImageRenderer
       // will handle null image properly, and will just render the background.
@@ -323,7 +382,7 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
     }
   }
 
-  /* Demonstrates how to access a CPU image using a download from GPU */
+  /* Demonstrates how to access a CPU image using a download from GPU. */
   private void renderProcessedImageGpuDownload(Frame frame) {
     // If there is a frame being requested previously, acquire the pixels and process it.
     if (gpuDownloadFrameBufferIndex >= 0) {
@@ -349,6 +408,8 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
           cpuImageDisplayRotationHelper.getViewportAspectRatio(),
           cpuImageDisplayRotationHelper.getCameraToDisplayRotation());
 
+      // Measure frame time since last successful execution of drawWithCpuImage().
+      cpuImageFrameTimeHelper.nextFrame();
     } else {
       cpuImageRenderer.drawWithoutCpuImage();
     }
@@ -360,20 +421,39 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
 
   public void onLowResolutionRadioButtonClicked(View view) {
     boolean checked = ((RadioButton) view).isChecked();
-    if (checked && !isLowResolutionSelected) {
-      // Display low resolution
+    if (checked && cpuResolution != ImageResolution.LOW_RESOLUTION) {
+      // Display low resolution.
       onCameraConfigChanged(cpuLowResolutionCameraConfig);
-      isLowResolutionSelected = true;
+      cpuResolution = ImageResolution.LOW_RESOLUTION;
+    }
+  }
+
+  public void onMediumResolutionRadioButtonClicked(View view) {
+    boolean checked = ((RadioButton) view).isChecked();
+    if (checked && cpuResolution != ImageResolution.MEDIUM_RESOLUTION) {
+      // Display medium resolution.
+      onCameraConfigChanged(cpuMediumResolutionCameraConfig);
+      cpuResolution = ImageResolution.MEDIUM_RESOLUTION;
     }
   }
 
   public void onHighResolutionRadioButtonClicked(View view) {
     boolean checked = ((RadioButton) view).isChecked();
-    if (checked && isLowResolutionSelected) {
-      // Display high resolution
+    if (checked && cpuResolution != ImageResolution.HIGH_RESOLUTION) {
+      // Display high resolution.
       onCameraConfigChanged(cpuHighResolutionCameraConfig);
-      isLowResolutionSelected = false;
+      cpuResolution = ImageResolution.HIGH_RESOLUTION;
     }
+  }
+
+  private void onCVModeChanged(CompoundButton unusedButton, boolean isChecked) {
+    cpuImageRenderer.setSplitterPosition(isChecked ? 0.0f : 1.0f);
+    isCVModeOn = isChecked;
+
+    // Display the CPU resolution related UI only when CPU image is being displayed.
+    boolean show = (cpuImageRenderer.getSplitterPosition() < 0.5f);
+    RadioGroup radioGroup = (RadioGroup) findViewById(R.id.radio_camera_configs);
+    radioGroup.setVisibility(show ? View.VISIBLE : View.INVISIBLE);
   }
 
   private void onFocusModeChanged(CompoundButton unusedButton, boolean isChecked) {
@@ -385,27 +465,29 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
     // To change the AR camera config - first we pause the AR session, set the desired camera
     // config and then resume the AR session.
     if (session != null) {
-      session.pause();
-      session.setCameraConfig(cameraConfig);
-      try {
-        session.resume();
-      } catch (CameraNotAvailableException ex) {
-        // In a rare case (such as another camera app launching) the camera may be given to a
-        // different app and so may not be available to this app. Handle this properly by showing a
-        // message and recreate the session at the next iteration.
-        messageSnackbarHelper.showError(this, "Camera not available. Please restart the app.");
-        session = null;
-        return;
+      // Block here if the image is still being used.
+      synchronized (frameImageInUseLock) {
+        session.pause();
+        session.setCameraConfig(cameraConfig);
+        try {
+          session.resume();
+        } catch (CameraNotAvailableException ex) {
+          messageSnackbarHelper.showError(this, "Camera not available. Try restarting the app.");
+          session = null;
+          return;
+        }
       }
 
       // Let the user know that the camera config is set.
       String toastMessage =
           "Set the camera config with CPU image resolution of "
-              + cameraConfig.getImageSize().getWidth()
-              + "x"
-              + cameraConfig.getImageSize().getHeight()
+              + cameraConfig.getImageSize()
+              + " and fps "
+              + cameraConfig.getFpsRange()
               + ".";
-      Toast.makeText(this, toastMessage, Toast.LENGTH_LONG).show();
+      Toast toast = Toast.makeText(this, toastMessage, Toast.LENGTH_LONG);
+      toast.setGravity(Gravity.BOTTOM, /* xOffset= */ 0, /* yOffset=*/ 250);
+      toast.show();
     }
   }
 
@@ -414,20 +496,35 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
   private void obtainCameraConfigs() {
     // First obtain the session handle before getting the list of various camera configs.
     if (session != null) {
-      List<CameraConfig> cameraConfigs = session.getSupportedCameraConfigs();
+      // Create filter here with desired fps filters.
+      CameraConfigFilter cameraConfigFilter =
+          new CameraConfigFilter(session)
+              .setTargetFps(
+                  EnumSet.of(
+                      CameraConfig.TargetFps.TARGET_FPS_30, CameraConfig.TargetFps.TARGET_FPS_60));
+      List<CameraConfig> cameraConfigs = session.getSupportedCameraConfigs(cameraConfigFilter);
+      Log.i(TAG, "Size of supported CameraConfigs list is " + cameraConfigs.size());
 
       // Determine the highest and lowest CPU resolutions.
       cpuLowResolutionCameraConfig =
-          getCameraConfigWithLowestOrHighestResolution(cameraConfigs, true);
+          getCameraConfigWithSelectedResolution(
+              cameraConfigs, /*ImageResolution*/ ImageResolution.LOW_RESOLUTION);
+      cpuMediumResolutionCameraConfig =
+          getCameraConfigWithSelectedResolution(
+              cameraConfigs, /*ImageResolution*/ ImageResolution.MEDIUM_RESOLUTION);
       cpuHighResolutionCameraConfig =
-          getCameraConfigWithLowestOrHighestResolution(cameraConfigs, false);
-
+          getCameraConfigWithSelectedResolution(
+              cameraConfigs, /*ImageResolution*/ ImageResolution.HIGH_RESOLUTION);
       // Update the radio buttons with the resolution info.
       updateRadioButtonText(
           R.id.radio_low_res, cpuLowResolutionCameraConfig, getString(R.string.label_low_res));
       updateRadioButtonText(
+          R.id.radio_medium_res,
+          cpuMediumResolutionCameraConfig,
+          getString(R.string.label_medium_res));
+      updateRadioButtonText(
           R.id.radio_high_res, cpuHighResolutionCameraConfig, getString(R.string.label_high_res));
-      isLowResolutionSelected = true;
+      cpuResolution = ImageResolution.LOW_RESOLUTION;
     }
   }
 
@@ -437,21 +534,29 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
     radioButton.setText(prefix + " (" + resolution.getWidth() + "x" + resolution.getHeight() + ")");
   }
 
-  private CameraConfig getCameraConfigWithLowestOrHighestResolution(
-      List<CameraConfig> cameraConfigs, boolean lowest) {
-    CameraConfig cameraConfig = cameraConfigs.get(0);
-    for (int index = 1; index < cameraConfigs.size(); index++) {
-      if (lowest) {
-        if (cameraConfigs.get(index).getImageSize().getHeight()
-            < cameraConfig.getImageSize().getHeight()) {
-          cameraConfig = cameraConfigs.get(index);
-        }
-      } else {
-        if (cameraConfigs.get(index).getImageSize().getHeight()
-            > cameraConfig.getImageSize().getHeight()) {
-          cameraConfig = cameraConfigs.get(index);
-        }
-      }
+  /* Get the CameraConfig with selected resolution. */
+  private static CameraConfig getCameraConfigWithSelectedResolution(
+      List<CameraConfig> cameraConfigs, ImageResolution resolution) {
+    // Take the first three camera configs, if camera configs size are larger than 3.
+    List<CameraConfig> cameraConfigsByResolution =
+        new ArrayList<>(
+            cameraConfigs.subList(0, Math.min(cameraConfigs.size(), 3)));
+    Collections.sort(
+        cameraConfigsByResolution,
+        (CameraConfig p1, CameraConfig p2) ->
+            Integer.compare(p1.getImageSize().getHeight(), p2.getImageSize().getHeight()));
+    CameraConfig cameraConfig = cameraConfigsByResolution.get(0);
+    switch (resolution) {
+      case LOW_RESOLUTION:
+        cameraConfig = cameraConfigsByResolution.get(0);
+        break;
+      case MEDIUM_RESOLUTION:
+        // There are some devices that medium resolution is the same as high resolution.
+        cameraConfig = cameraConfigsByResolution.get(1);
+        break;
+      case HIGH_RESOLUTION:
+        cameraConfig = cameraConfigsByResolution.get(2);
+        break;
     }
     return cameraConfig;
   }
@@ -486,6 +591,10 @@ public class ComputerVisionActivity extends AppCompatActivity implements GLSurfa
         imageSize[0],
         imageSize[1],
         fovX,
-        fovY);
+        fovY,
+        renderFrameTimeHelper.getSmoothedFrameTime(),
+        renderFrameTimeHelper.getSmoothedFrameRate(),
+        cpuImageFrameTimeHelper.getSmoothedFrameTime(),
+        cpuImageFrameTimeHelper.getSmoothedFrameRate());
   }
 }
